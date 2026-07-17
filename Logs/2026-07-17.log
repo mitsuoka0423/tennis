@@ -1,0 +1,92 @@
+# 作業ログ 2026-07-17
+
+## 実行計画
+
+Phase 1（High-Frequency Data Collector）の**実機検証**を行う。
+2026-07-15 に実施した WorkoutSessionManager / センサー層の `@MainActor` デッドロック
+修正群（BUILD SUCCEEDED 止まりで実機未検証）が、実機で正しく動作するかを確認する。
+
+検証目的（REQUIREMENTS.md F-W2）:
+- 計測開始 → 録画画面へ遷移するか
+- センサーデータが届き、サンプル数が増え続けるか
+- 実測 Hz が **800Hz 付近**か
+- ロス率が **1% 未満**か
+
+→ 実機検証の前提として、Apple Watch を Xcode の実行先に追加する必要があるが、
+**そこで詰まっている**（本ログはその接続トラブルシュートが主）。
+
+---
+
+## 環境情報
+
+- Xcode: 26.6（Build 17F113）
+- Mac: MitsuokaのMacBook Air
+- iPhone: MTS PRV / iPhone 15 Pro / iOS 26.5.2 / UDID 00008130-001958511160001C
+  - `devicectl list devices` で **connected**（正常）
+  - デベロッパモード: ON
+- Apple Watch: Apple Watch Series 9（45mm）/ watchOS 26.5（23T570）
+  - App Bundle ID: `com.spleeing.TennisAnalyser`
+- スキーム: `TennisAnalyser Watch App`（Watch 単体 / Phase 1 対象）
+- Watch は 2.4GHz Wi-Fi のみ対応 → Mac/iPhone/Watch を同一 2.4GHz SSID に統一済み
+
+---
+
+## 問題
+
+**Apple Watch が Xcode の PAIRED WATCHES / `devicectl` に現れず、実行先ドロップダウンに選べない。**
+そのため ⌘R での実機インストールに進めない。
+
+- `xcrun devicectl list devices` → iPhone(MTS PRV) のみ。Watch は出ない（複数回確認）。
+- 実行先ドロップダウン → 「No eligible devices connected to 'My Mac'」。Watch 候補なし。
+- iPhone の Watch アプリでは Watch は**正常にペア表示**（= 物理ペアは生存, CHK-PAIR=はい）。
+
+### 経緯・背景（重要）
+- Watch の名前変更時に、**Xcode の Devices ウィンドウで Watch を Unpair（開発ペアリング解除）してしまった**。これが接続不安定の発端。
+- その後、Xcode 上で「このコンピュータを信頼」ダイアログは許可済み。
+- 復旧のため **iPhone の Watch アプリから物理ペア解除 → 再ペアリング（Watch 消去→バックアップ復元）を実施済み**。
+- 再ペアリング後、Watch 設定に**デベロッパモード項目が出ない**
+  （watchOS は Xcode に開発対象として認識されて初めて項目が出るため。接続が先で正常な順序）。
+
+---
+
+## 作業ログ（トラブルシュート）
+
+試した手順と結果（すべて Watch は出ないまま）:
+
+- A1: Xcode 完全終了（⌘Q, `pgrep -fl Xcode` で残プロセスなし確認）→ 再起動 → **変化なし**
+- A2: iPhone USB 抜き差し → 信頼 → MTS PRV 選択で待機 → **変化なし**
+- A3: iPhone ロック解除・Watch 点灯で待機 → **変化なし**
+- A4: Mac/iPhone/Watch を同一 2.4GHz Wi-Fi に統一 → **変化なし**
+- A5: **Mac 再起動 → これから実施**（本ログ記録の直後に再起動）
+
+確認済み事実:
+- CHK-PAIR = はい（iPhone の Watch アプリで Watch は正常ペア）
+- CHK-WIFI = 3台とも同一 2.4GHz SSID
+- Xcode/iPhone のデベロッパモードは問題なし。Watch のみ項目未出現（接続未確立が原因）。
+
+---
+
+## ネクストアクション（Mac 再起動後にここから再開）
+
+1. **A5 の結果確認**: Mac 再起動後、以下を整えて Watch が現れるか確認
+   - iPhone を USB 接続・**ロック解除のまま**
+   - Watch を**充電器で点灯維持**・**2.4GHz Wi-Fi 接続**
+   - Xcode 起動 → Devices ウィンドウ（⇧⌘2）→ PAIRED WATCHES を確認
+   - ターミナルで `xcrun devicectl list devices` を実行し Watch が出るか裏取り
+
+2. **出た場合**: PAIRED WATCHES の Watch 行を選択 → "Preparing debugger support…" 完了を待つ
+   → Watch 設定にデベロッパモード項目が出現 → **オン → 再起動**
+   → スキーム `TennisAnalyser Watch App` + 実行先 Watch で **⌘R** → 実機インストール
+
+3. **まだ出ない場合**: デバイス管理デーモンのリセットを試す
+   - `remotepairingd` / CoreDevice 系デーモンの再起動（sudo 要。Claude 側でコマンド用意可）
+   - それでもダメなら Apple の watchOS ワイヤレスデバッグの既知の不安定性を疑い、
+     ネットワーク環境（ルータの AP 分離設定 = クライアント間通信のブロックが無いか）を確認
+
+4. **実機接続後の本来の検証**（Phase 1 実機検証）:
+   - 計測開始 → 録画画面遷移するか
+   - サンプル数が増え続けるか / 実測 Hz（目標 800Hz）/ ロス率（目標 1% 未満・緑表示）
+   - 数回スイングして値が更新されるか目視 + Console ログ（measuredHz）確認
+   - 結果を本ログに追記
+
+5. **検証通過後**: Phase 2（P2-T1 `WCSessionTransferRepository`, F-W5）へ

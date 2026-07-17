@@ -1,0 +1,87 @@
+# 作業ログ 2026-07-18
+
+## 実行計画
+
+2026-07-17 から継続。Phase 1（High-Frequency Data Collector）の実機検証。
+
+- Apple Watch の Xcode 接続トラブル解決（前日からの持ち越し）
+- REQUIREMENTS.md F-W2 の実機検証（サンプリングレート・ロス率）
+
+---
+
+## 作業ログ
+
+### Watch 接続トラブルの解決
+
+前日から続いていた「Watch が Xcode / devicectl に現れない」問題が解決。
+
+**試行の経緯**:
+- Mac 再起動（A5）→ 効果なし
+- `sudo pkill -f remotepairingd; sudo pkill -f CoreDeviceService`（デーモン再起動）→ 直後は効果なし
+- macOS ローカルネットワーク権限（Xcode）→ 既に ON でシロ
+- iPhone がスリープで `Offline` になっていた → スリープ解除で `connected` に復帰
+
+**解決**: 上記の後、Watch の 設定 → プライバシーとセキュリティ に**デベロッパモード項目が出現**。
+ON → Watch 再起動で `devicectl list devices` に `MTS Watch Main`（Apple Watch Series 9）が
+`available (paired)` として出現。⌘R での実機インストールが可能になった。
+
+**教訓**:
+- Xcode 15+ / watchOS 10+ は CoreDevice アーキテクチャで、Watch は USB 接続の iPhone 経由で
+  トンネリングされる。Wi-Fi 直結（旧方式）の知識でネットワーク系を疑うのは遠回りだった
+- iPhone（トンネルのホスト）のロック解除・スリープ状態が接続に直結する
+- デベロッパモード項目は Xcode に認識されて初めて出現する（順序が重要）
+
+### 実機検証と発覚した問題の修正
+
+**問題1: サンプル数が増えない**
+- 原因: 3g の1次フィルタ（`accelerationThreshold = 3.0`）は設計通り動作しており、
+  静止中はサンプルが記録されないのが正しい挙動だった
+- Console で `[UseCase] received batch: 200 samples` 連続受信を確認 → センサー配管は正常
+- 強くスイングするとサンプル数増加（3回で148）→ フィルタも正常
+- **2026-07-15 の @MainActor デッドロック修正群は実機で正しく動作していることを確認**
+
+**問題2: 実測Hz・ロス率がフィルタ後サンプルから計算されていた**
+- 修正: `RecordSessionUseCase` に `rawSampleCount`（フィルタ前の生カウント）を追加し、
+  Hz・ロス率は生カウントから計算するよう変更
+
+**問題3: 実測 197Hz / ロス率 75.8%（target 800Hz 比）**
+- 原因判明: `deviceMotionUpdates()` の仕様上限は **200Hz**（`accelerometerUpdates()` は加速度のみ 800Hz）
+- **意思決定: deviceMotion 200Hz を採用（選択肢A）**
+  - 加速度・角速度が同期済み・重力除去済みで扱いやすい
+  - ショット分類には 100〜200Hz が一般的で十分と判断
+  - Phase 3 で分類精度が不足した場合に 800Hz（accelerometer 併用）を再検討
+- `targetHz` を 800 → 200 に変更、REQUIREMENTS.md（F-W2 / NFR / Phase 1）も更新
+
+**問題4: ロス率が 1.0〜1.6% で基準未達**
+- 原因: 壁時計ベースの計算のため、ストリーム立ち上がりの助走時間や
+  バッチ到着〜画面更新タイマー間のジッタ（最大約1秒）がロスとして混入
+- 修正: **センサータイムスタンプベースの計算**に変更
+  （`measuredRawHz = (rawSampleCount - 1) / タイムスタンプ範囲`）
+
+---
+
+## 検証結果（F-W2）
+
+| 項目 | 目標 | 実測 | 判定 |
+|---|---|---|---|
+| 計測開始 → 録画画面遷移 | 遷移する | 遷移した（HealthKit 認可含む） | ✅ |
+| サンプリングレート | 200Hz（仕様上限） | **200Hz** | ✅ |
+| ロス率 | 1% 未満 | **0.2%**（緑表示） | ✅ |
+| スイングでサンプル記録 | 増える | 3スイングで148サンプル | ✅ |
+| 画面消灯中の計測継続 | 継続する | **未検証**（デバッガ接続の有無に関わらず消灯せずスキップ。方法要調査） | ⏸ |
+
+**Phase 1 実機検証: 合格（消灯テストのみ持ち越し）**
+
+環境: Apple Watch Series 9 (45mm) / watchOS 26.5 / Xcode 26.6
+
+---
+
+## ネクストアクション
+
+1. **Phase 2 着手**: P2-T1 `WCSessionTransferRepository` 実装（F-W5）
+   - `WCSession.transferFile` で iPhone へ CSV 送信、転送完了後にローカルキャッシュ自動削除
+   - P2-T2: iOS 側受信ハンドラ（F-I1）
+2. **持ち越し（小粒）**:
+   - 画面消灯中の計測継続テスト（消灯方法の調査から）
+   - ビルド warning 4件の解消（`samplingTask` Sendable closure ×2、不要 `await` ×2）
+   - バッテリー消費の実測（1時間で20%以下、REQUIREMENTS.md NFR）

@@ -1,0 +1,243 @@
+# 作業ログ 2026-07-15
+
+## 実行計画
+
+REQUIREMENTS.md に基づく開発ロードマップ。
+
+### Phase 1: High-Frequency Data Collector（現在対応中）
+- P1-T1: warning 解消（`samplingTask` Sendable closure 問題、不要 await）
+- P1-T2: `MockMotionSensorRepository` 作成（シミュレータ動作確認用）
+- P1-T3: 実機ビルド・動作確認の準備（entitlements 確認）
+- P1-T4: サンプリングレート実測ログ強化（計測中の measuredHz 更新）
+
+### Phase 2: Data Transfer（Watch→iPhone）
+- P2-T1: `WCSessionTransferRepository` 実装（F-W5）
+- P2-T2: iOS側受信ハンドラ実装（F-I1）
+
+### Phase 3: Core ML & 可視化
+- P3-T1: Create ML ショット分類モデル学習
+- P3-T2: iOS ダッシュボードUI（SwiftUI Charts）
+
+---
+
+## 作業ログ
+
+### 15:28 - ビルドエラーの修正
+
+**問題**: `MotionSensorRepositoryImpl.swift` のビルドエラー
+- `CMBatchedSensorManager` に `accelerometerData`、`deviceMotion` プロパティが存在しない
+
+**原因**: `CMBatchedSensorManager` は非同期シーケンス（`accelerometerUpdates()`、`deviceMotionUpdates()`）でデータを提供するAPIであり、プロパティアクセスは誤り。
+
+**修正内容**:
+- ポーリング方式（プロパティアクセス）→ AsyncSequence 消費方式に書き換え
+- `@MainActor` アノテーションを追加
+- `makeSample` を `nonisolated static` に変更
+- `consumeSensorStreams` 内で `manager` を MainActor 上でキャプチャ
+
+**結果**: BUILD SUCCEEDED（warning 2件残存）
+
+**残 warning**:
+1. `samplingTask` can not be referenced/mutated from a Sendable closure（line 45, 46）
+2. `RecordSessionUseCase.swift:69` no 'async' operations occur within 'await' expression
+
+---
+
+### 15:35 - 作業計画の策定
+
+REQUIREMENTS.md を精読し、現状の実装との差分を確認。
+上記「実行計画」セクションに整理。
+
+現在地: **Phase 1 / P1-T1（warning 解消）着手前**
+
+---
+
+### 15:44 - P1-T1: warning 解消
+
+**修正1**: `MotionSensorRepositoryImpl.swift`
+- `continuation.onTermination` クロージャ内の `samplingTask` への参照が Sendable closure warning
+- 対処: `Task { @MainActor [weak self] in ... }` で包み、MainActor 上でのアクセスを保証
+
+**修正2**: `RecordSessionUseCase.swift`
+- `processBatch` は `@MainActor` の同期メソッドであるため `await` 不要
+- 対処: `await self.processBatch(batch)` → `self.processBatch(batch)`
+
+**結果**: BUILD SUCCEEDED、対象 warning なし（15:44 確認）
+
+---
+
+### 15:47 - Phase 1 全実装
+
+#### P1-T2: MockMotionSensorRepository 作成
+
+**新規ファイル**: `Infrastructure/MockMotionSensorRepository.swift`
+- サイン波ベースの加速度・角速度を生成（2秒ごとに 4g のスイングパルスを発生）
+- `targetHz` をそのまま sleep 間隔に使用
+- シミュレータ・プレビューでの UI / ViewModel / UseCase 動作確認に使用
+
+**WorkoutViewModel 改修**:
+- `init(useMock:)` 引数を追加。`useMock: true` で `MockMotionSensorRepository` を使用
+- `ContentView` にて `ProcessInfo.processInfo.environment["SIMULATOR_DEVICE_NAME"] != nil` でシミュレータを自動検出してモックへ切り替え
+- シミュレータでは HealthKit（`startWorkout`）の起動をスキップ
+
+#### P1-T3: entitlements 修正
+
+**修正ファイル**: `TennisAnalyser Watch App.entitlements`
+- `com.apple.developer.healthkit.background-delivery: true` を追加
+- 画面消灯中（スイング中）のプロセスサスペンド防止に必要
+
+#### P1-T4: measuredHz リアルタイム更新・ロス率
+
+**WorkoutViewModel**:
+- タイマー（1秒ごと）の中で `updateStats()` を呼び `measuredHz`・`lossRate` を随時更新
+- `lossRate = max(0, 1 - 実測Hz / targetHz)` で計算
+- `lossRateString: String` で `xx.x%` 形式に変換
+
+**ContentView / RecordingView**:
+- `StatRow` に `valueColor: Color` 引数を追加（デフォルト `.white`）
+- ロス率行を常時表示（計測前は `---`）
+- ロス率の色: 1%未満=緑、5%未満=黄、以上=赤（要件 F-W2 の 1% 未満基準を可視化）
+
+**結果**: BUILD SUCCEEDED、Swift warning 0件（15:47 確認）
+
+---
+
+### 16:09 - HealthKit Not Authorized エラーの修正
+
+**問題**: 実機で計測開始すると "Not Authorized" エラーが表示される
+- Xcode ログ: `HKErrorCode=3`、Error(7) state（認可エラー状態からの遷移失敗）
+
+**原因**: `requestAuthorization()` がアプリ起動時に呼ばれていなかった
+
+**修正内容**:
+
+1. `TennisAnalyserApp.swift`: `.task` モディファイアで起動時に `requestAuthorization()` を呼ぶよう修正
+   - `WorkoutSessionManager` を `@StateObject` で App レベルに持ち上げ、`ContentView` へ注入
+
+2. `ContentView.swift`: `init(workoutSessionManager:)` を追加し、App から注入された `WorkoutSessionManager` を `WorkoutViewModel` へ渡せるよう変更
+
+3. `WorkoutSessionManager.startWorkout()`: 認可状態チェックを追加
+   - `.notDetermined` → 自動で `requestAuthorization()` を呼ぶ
+   - `.sharingDenied` → `WorkoutSessionError.notAuthorized` をスロー
+
+4. `WorkoutSessionError`: `notAuthorized` ケースを追加（設定アプリ誘導メッセージ付き）
+
+**結果**: BUILD SUCCEEDED（16:09 確認）
+
+---
+
+## ネクストアクション（Phase 1 完了後）
+
+1. **実機再検証**: 修正後の実機ビルドで認可ダイアログが表示されること、計測開始できることを確認
+   - 目標: 800Hz、ロス率 1% 未満（REQUIREMENTS.md F-W2）
+   - 計測結果をログに記録する
+
+2. **Phase 2 着手**: P2-T1 `WCSessionTransferRepository` 実装
+   - `SessionRepository` に `transfer(sessionId:)` を追加
+   - `WCSession.transferFile` で iPhone へ CSV を送信
+   - 転送完了後にローカルキャッシュを自動削除（F-W5）
+
+### 16:17 - 計測開始ボタン無反応の修正
+
+**問題**: 実機で計測開始ボタンを押しても画面が切り替わらず何も起きない
+
+**原因1**: `startWorkout()` の処理順序が誤っていた
+- `session.startActivity()` を呼んだ直後に `builder.beginCollection()` を await していた
+- `HKWorkoutSession` は `startActivity()` を呼んでもすぐに `.running` にならず、delegate の `didChangeTo` で `.running` を受け取ってから `beginCollection` を呼ぶ必要がある
+- 誤った順序では `beginCollection` がセッション未開始状態で await してブロック→そのまま無応答
+
+**原因2**: エラーが発生していてもアラートが表示されなかった
+- `isPresented: .constant(viewModel.errorMessage != nil)` は SwiftUI の binding として変化を検知できない
+- エラーが起きていても画面に表示されず、ユーザーが無反応と認識していた
+
+**修正内容**:
+
+1. `WorkoutSessionManager.swift`: `CheckedContinuation` で `startActivity()` → delegate `.running` → `beginCollection` の順序を保証
+2. `ContentView.swift`: `.alert` の `isPresented` を `@State` + `.onChange` に変更
+3. `WorkoutViewModel.swift`: `clearError()` を追加
+
+**結果**: BUILD SUCCEEDED（16:17 確認）
+
+---
+
+## ネクストアクション
+
+1. **実機再検証**: 修正後の実機ビルドで計測開始→録画画面に遷移することを確認
+   - 目標: 800Hz、ロス率 1% 未満（REQUIREMENTS.md F-W2）
+2. **Phase 2 着手**: P2-T1 `WCSessionTransferRepository` 実装
+   - `WCSession.transferFile` で iPhone へ CSV 送信、転送完了後にローカル削除（F-W5）
+
+### 16:28 - 計測開始無反応の根本修正（WorkoutSessionManager 再設計）
+
+**問題の再診断**: 前回の修正後も変化なし
+
+**真の根本原因**: `WorkoutSessionManager` に `@MainActor` を付けていたことで
+delegate コールバックの呼び出しが MainActor キューに積まれるまで遅延し、
+`withCheckedThrowingContinuation` の resume が実質機能していなかった。
+
+**修正方針**: `WorkoutSessionManager` から `@MainActor` を完全に取り除く
+- `@Published` の更新は `DispatchQueue.main.async` で明示的に行う
+- delegate メソッドは `nonisolated` でなく通常メソッドとして宣言（HealthKit 内部スレッドから直接呼ばれる）
+- `ContinuationBox` は不要になったため削除
+
+**結果**: BUILD SUCCEEDED、warning 0件（clean build 確認済み、16:28）
+
+### 16:35 - 計測開始中のローダー表示追加
+
+**問題**: ボタンタップ後、HealthKit 認可ダイアログが出るまで無反応に見える
+
+**修正内容**:
+
+1. `WorkoutViewModel`: `isStarting: Bool` を追加
+   - `start()` の冒頭で `true`、完了またはエラー時に `false`
+   - `isStarting` 中は `start()` を二重呼び出し不可にする guard も追加
+
+2. `ContentView`: `isStarting == true` のとき `StartingView` を表示
+   - `ProgressView`（スピナー）+ 「準備中...」テキスト
+   - 「ヘルスケアの許可が求められる場合があります」のガイドテキスト
+
+**結果**: BUILD SUCCEEDED（16:35 確認）
+
+### 16:38 - スピナー停止（デッドロック）の根本修正
+
+**問題の確定**: `startWorkout()` が永遠に返らずスピナーで止まる
+
+**根本原因**: `@MainActor` クラスの `async` メソッドが MainActor キューを占有したまま
+`for await` / `withCheckedThrowingContinuation` で待機するため、
+delegate から `Task { @MainActor in yield }` を積んでも実行できないデッドロック。
+
+**最終修正方針**: `WorkoutSessionManager` から `@MainActor` と `ObservableObject` を完全に除去
+- 純粋な `NSObject` サブクラスとして、actor isolation なしで動作させる
+- delegate メソッドも通常メソッドとして宣言（HealthKit 内部スレッドから直接 yield を呼ぶ）
+- `@Published` 状態管理は `WorkoutViewModel` に完全委譲
+- `TennisAnalyserApp` では `@State` で保持（`@StateObject` は不要）
+- `WorkoutViewModel.start()/stop()` は `Task.detached` で MainActor から切り離して呼ぶ
+
+**結果**: BUILD SUCCEEDED、warning 0件（clean build 確認済み、16:38）
+
+### 16:43 - センサーデータが届かない問題の修正
+
+**問題**: 計測中画面は表示されるがサンプル数0・Hz/ロス率---のまま
+
+**根本原因**: `@MainActor` 上の `for await` によるデッドロックがセンサー層にも存在
+
+1. `MotionSensorRepositoryImpl.consumeSensorStreams()`:
+   - `withTaskGroup` で `@MainActor` タスクを2つ起動し、それぞれ `for await` でブロック
+   - MainActor キューが占有されデータが届かない
+
+2. `RecordSessionUseCase.startSession()`:
+   - `Task { }` は呼び出し元の `@MainActor` を継承するため、
+     `for try await batch in stream` が MainActor 上で待機し同様のデッドロック
+
+**修正内容**:
+
+1. `MotionSensorRepositoryImpl` を全面書き直し
+   - `@MainActor` を完全に除去
+   - `deviceMotionUpdates()` のみ使用（CMDeviceMotion に加速度・角速度が両方含まれるため
+     accelerometerUpdates() とのペアリング処理が不要）
+   - `for await batch` を actor isolation なしのシンプルな Task で消費
+
+2. `RecordSessionUseCase.startSession()`
+   - `Task { }` → `Task.detached { }` に変更してセンサーストリーム消費を MainActor から切り離す
+
+**結果**: BUILD SUCCEEDED、warning 0件（16:43 確認）
