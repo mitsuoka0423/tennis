@@ -10,11 +10,21 @@ import RealityKit
 
 struct SwingDetailView: View {
 
-    let record: SwingRecord
+    /// F-I3: 一覧の最新状態から該当スイングを引く（タグ付け直後に表示へ反映するため）
+    let recordId: String
+    @EnvironmentObject private var store: SwingStore
 
     @State private var samples: [SwingSamplePoint] = []
     @State private var isLoading = true
     @State private var showsAxisGuide = false
+
+    private var record: SwingRecord? {
+        store.records.first { $0.id == recordId }
+    }
+
+    init(recordId: String) {
+        self.recordId = recordId
+    }
 
     /// X/Y/Z 軸の系列色（AxisPalette: 座標軸ガイドと同一配色・固定順で循環させない）
     private static let axisColors: KeyValuePairs<String, Color> = [
@@ -24,9 +34,44 @@ struct SwingDetailView: View {
     ]
 
     var body: some View {
+        Group {
+            if let record {
+                content(for: record)
+            } else {
+                ContentUnavailableView("スイングが見つかりません", systemImage: "questionmark.circle")
+            }
+        }
+        .navigationTitle(record.map { "スイング #\($0.sequence)" } ?? "スイング")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showsAxisGuide = true
+                } label: {
+                    Image(systemName: "move.3d")
+                }
+                .accessibilityLabel("座標軸ガイド")
+            }
+        }
+        .sheet(isPresented: $showsAxisGuide) {
+            AxisGuideView()
+        }
+        .task {
+            // 波形は詳細表示時に遅延ロード（一覧はメタ情報のみで軽量に保つ）
+            guard let url = record?.fileURL else { return }
+            let loaded = await Task.detached(priority: .userInitiated) {
+                SwingCSVParser.parseSamples(fileURL: url)
+            }.value
+            samples = loaded
+            isLoading = false
+        }
+    }
+
+    @ViewBuilder
+    private func content(for record: SwingRecord) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                header
+                header(for: record)
 
                 if isLoading {
                     ProgressView("読み込み中...")
@@ -45,40 +90,17 @@ struct SwingDetailView: View {
                         title: "角速度 (°/s)",
                         points: gyroPoints
                     )
+                    analysisSection
                 }
             }
             .padding()
-        }
-        .navigationTitle("スイング #\(record.sequence)")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showsAxisGuide = true
-                } label: {
-                    Image(systemName: "move.3d")
-                }
-                .accessibilityLabel("座標軸ガイド")
-            }
-        }
-        .sheet(isPresented: $showsAxisGuide) {
-            AxisGuideView()
-        }
-        .task {
-            // 波形は詳細表示時に遅延ロード（一覧はメタ情報のみで軽量に保つ）
-            let url = record.fileURL
-            let loaded = await Task.detached(priority: .userInitiated) {
-                SwingCSVParser.parseSamples(fileURL: url)
-            }.value
-            samples = loaded
-            isLoading = false
         }
     }
 
     // MARK: - Header
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
+    private func header(for record: SwingRecord) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
             if let date = record.detectedAt {
                 // I-2: 日付は yyyy-MM-dd 表記
                 Text(date.ymdhmsString)
@@ -92,6 +114,26 @@ struct SwingDetailView: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+
+            // F-I3: ショット種別アノテーション
+            Menu {
+                ForEach(ShotClass.allCases) { shotClass in
+                    Button(shotClass.displayName) {
+                        store.setShotClass(shotClass, for: record)
+                    }
+                }
+            } label: {
+                Label(
+                    record.shotClass?.displayName ?? "ショット種別を選択",
+                    systemImage: record.shotClass == nil ? "tag" : "tag.fill"
+                )
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(record.shotClass == nil ? Color.accentColor : Color.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(record.shotClass == nil ? Color.accentColor.opacity(0.12) : Color.accentColor)
+                .clipShape(Capsule())
+            }
         }
     }
 
@@ -107,7 +149,7 @@ struct SwingDetailView: View {
 
     /// インパクト時刻（相対時間の原点）。メタ欠損時は先頭サンプル
     private var impactMs: Int64 {
-        record.impactTimestampMs ?? samples.first?.timestampMs ?? 0
+        record?.impactTimestampMs ?? samples.first?.timestampMs ?? 0
     }
 
     private var accelerationPoints: [ChartPoint] {
@@ -128,6 +170,45 @@ struct SwingDetailView: View {
                     value: value,
                     axis: axis
                 )
+            }
+        }
+    }
+
+    // MARK: - Analysis (F-I4 簡易指標)
+
+    private var analysisResult: SwingAnalysisResult? {
+        SwingAnalyzer.analyze(samples: samples, impactMs: impactMs)
+    }
+
+    @ViewBuilder
+    private var analysisSection: some View {
+        if let result = analysisResult {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 4) {
+                    Text("簡易指標")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    // F-I4: 本格的なスコアリング（自己ベスト比較等）は未実装であることを明示
+                    Text("(β)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
+                    GridRow {
+                        Text("ピーク時刻").foregroundStyle(.secondary)
+                        Text(String(format: "インパクトから %+.3f 秒", result.peakTimeSec))
+                    }
+                    GridRow {
+                        Text("減速開始").foregroundStyle(.secondary)
+                        if let onset = result.decelerationOnsetTimeSec {
+                            Text(String(format: "インパクトから %+.3f 秒", onset))
+                        } else {
+                            Text("検出できず（ウィンドウ末尾まで高加速度）")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .font(.caption)
             }
         }
     }

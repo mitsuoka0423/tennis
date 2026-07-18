@@ -95,6 +95,28 @@ final class SwingStore: ObservableObject {
         }
     }
 
+    /// スイングにショット種別をタグ付けする（F-I3）
+    func setShotClass(_ shotClass: ShotClass, for record: SwingRecord) {
+        do {
+            try SwingCSVParser.writeShotClass(fileURL: record.fileURL, shotClass: shotClass)
+            reload()
+        } catch {
+            print("[SwingStore] setShotClass error: \(error)")
+        }
+    }
+
+    /// 複数スイングへ同一のショット種別を一括タグ付けする（ラリー中の連続ショット向け）
+    func setShotClass(_ shotClass: ShotClass, for records: [SwingRecord]) {
+        for record in records {
+            do {
+                try SwingCSVParser.writeShotClass(fileURL: record.fileURL, shotClass: shotClass)
+            } catch {
+                print("[SwingStore] setShotClass error: \(error)")
+            }
+        }
+        reload()
+    }
+
     /// スイングを削除する（ユーザー操作）
     func delete(_ record: SwingRecord) {
         try? fileManager.removeItem(at: record.fileURL)
