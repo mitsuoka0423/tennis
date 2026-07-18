@@ -328,13 +328,17 @@ private struct Watch3DAxisView: View {
         crown.position = [crownOnLeft ? -0.62 : 0.62, 0.2, 0]
         root.addChild(crown)
 
-        // I-1: 透明の境界ボックスでカメラの初期フレーミングを広げ、
-        // モデルが画面の約50%で表示されるようにする（orbit カメラは可視境界に合わせてズームするため）
-        let spacer = ModelEntity(
-            mesh: .generateBox(width: 8.0, height: 8.0, depth: 0.01),
-            materials: [UnlitMaterial(color: UIColor(white: 0, alpha: 0))]
-        )
-        root.addChild(spacer)
+        // I-1: 極小マーカー（サブピクセルで実質不可視）で可視境界を広げ、
+        // モデルが画面の約50%で表示されるようにする
+        // （orbit カメラは可視境界に合わせてズームするため。
+        //   半透明マテリアルの平面は黒く描画される問題があったためこの方式）
+        let markerMesh = MeshResource.generateBox(size: 0.001)
+        let markerMaterial = UnlitMaterial(color: UIColor(white: 0.5, alpha: 1.0))
+        for position: SIMD3<Float> in [[2.8, 0, 0], [-2.8, 0, 0], [0, 2.8, 0], [0, -2.8, 0]] {
+            let marker = ModelEntity(mesh: markerMesh, materials: [markerMaterial])
+            marker.position = position
+            root.addChild(marker)
+        }
 
         // 座標軸（画面基準・リューズ位置に依らず固定）
         root.addChild(axisArrow(direction: [1, 0, 0], colorHex: (0x42, 0x69, 0xD0), label: "+X"))

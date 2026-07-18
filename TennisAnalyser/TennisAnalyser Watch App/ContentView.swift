@@ -71,33 +71,36 @@ private struct StartingView: View {
 // MARK: - StandbyView
 
 /// 待機中の画面（開始ボタン）
+///
+/// W-4: ボタンは RecordingView と同じ ActionButton + 同じコンテナ余白で
+/// 大きさ・位置を完全に揃える（画面切替時にボタンがずれない）
 private struct StandbyView: View {
     @ObservedObject var viewModel: WorkoutViewModel
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 6) {
+            Spacer(minLength: 0)
+
             Image(systemName: "figure.tennis")
-                .font(.system(size: 40))
+                .font(.system(size: 36))
                 .foregroundStyle(.green)
 
             Text("Tennis Analyser")
                 .font(.headline)
                 .foregroundStyle(.white)
 
-            Button {
+            Spacer(minLength: 4)
+
+            ActionButton(
+                title: "計測開始",
+                systemImage: "record.circle",
+                background: .green
+            ) {
                 viewModel.start()
-            } label: {
-                Label("計測開始", systemImage: "record.circle")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(.green)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
             }
-            .buttonStyle(.plain)
         }
-        .padding()
+        .padding(.horizontal)
+        .padding(.vertical, 6)
     }
 }
 
@@ -142,18 +145,13 @@ private struct RecordingView: View {
 
             Spacer(minLength: 4)
 
-            Button {
+            ActionButton(
+                title: "停止・保存",
+                systemImage: "stop.circle",
+                background: .red
+            ) {
                 viewModel.stop()
-            } label: {
-                Label("停止・保存", systemImage: "stop.circle")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(.red)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal)
         .padding(.vertical, 6)
@@ -170,6 +168,29 @@ private struct RecordingView: View {
         if rate < 0.01 { return .green }
         if rate < 0.05 { return .yellow }
         return .red
+    }
+}
+
+// MARK: - ActionButton
+
+/// 開始/停止ボタンの共通スタイル（W-4: 両画面で大きさ・位置を統一）
+private struct ActionButton: View {
+    let title: String
+    let systemImage: String
+    let background: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(background)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
     }
 }
 
