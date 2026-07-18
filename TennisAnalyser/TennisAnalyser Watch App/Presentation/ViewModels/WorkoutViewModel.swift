@@ -29,6 +29,10 @@ final class WorkoutViewModel: ObservableObject {
     @Published private(set) var isStarting: Bool = false
     /// 検知済みスイング数
     @Published private(set) var swingCount: Int = 0
+    /// iPhone へ転送完了したスイング数
+    @Published private(set) var transferredCount: Int = 0
+    /// 未転送（キュー内 + ローカル残存）のスイング数
+    @Published private(set) var pendingTransferCount: Int = 0
     @Published private(set) var sampleCount: Int = 0
     @Published private(set) var elapsedSeconds: Int = 0
     /// 計測中にリアルタイム更新される実測サンプリングレート (Hz)
@@ -44,6 +48,7 @@ final class WorkoutViewModel: ObservableObject {
 
     // MARK: - Private
 
+    private let transferRepo: any SwingTransferRepository
     private var timerTask: Task<Void, Never>?
     private var startDate: Date?
 
@@ -61,6 +66,7 @@ final class WorkoutViewModel: ObservableObject {
         self.useMock = useMock
         self.workoutSessionManager = workoutSessionManager ?? WorkoutSessionManager()
 
+        let swingRepo = SwingRepositoryImpl()
         if let useCase = recordSessionUseCase {
             self.recordSessionUseCase = useCase
         } else {
@@ -69,11 +75,14 @@ final class WorkoutViewModel: ObservableObject {
                 : MotionSensorRepositoryImpl()
             self.recordSessionUseCase = RecordSessionUseCase(
                 motionRepo: motionRepo,
-                swingRepo: SwingRepositoryImpl()
+                swingRepo: swingRepo
             )
         }
+        // F-W5: 保存済みスイングを WCSession で iPhone へ逐次転送
+        self.transferRepo = WCSessionTransferRepository(swingRepo: swingRepo)
 
         observeUseCase()
+        wireTransfer()
     }
 
     // MARK: - Public API
@@ -131,11 +140,25 @@ final class WorkoutViewModel: ObservableObject {
                 self.isRecording = false
                 self.stopTimer()
                 self.updateStats()
+                // ワークアウト終了時に未転送分を再送（F-W5）
+                self.transferRepo.retryPending()
             }
         }
     }
 
     // MARK: - Private
+
+    /// 転送層の配線: 保存完了 → エンキュー、状態変化 → Published 更新
+    private func wireTransfer() {
+        recordSessionUseCase.onSwingSaved = { [weak self] swing, url in
+            self?.transferRepo.enqueue(fileURL: url, swing: swing)
+        }
+        transferRepo.onStatusChanged = { [weak self] transferred, pending in
+            self?.transferredCount = transferred
+            self?.pendingTransferCount = pending
+        }
+        transferRepo.activate()
+    }
 
     private func observeUseCase() {
         Task { @MainActor in

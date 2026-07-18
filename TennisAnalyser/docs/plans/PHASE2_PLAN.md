@@ -19,9 +19,7 @@
 
 ## 現在地
 
-**P2-T2 完了**（2026-07-18）。次: P2-T3
-- DoD の「シミュレータでログ確認」は SwingRepositoryImpl のユニットテスト
-  （CSV生成・保存・削除ラウンドトリップ）で代替（再現可能性が高いため）
+**P2-T3 完了**（2026-07-18）。次: P2-T4
 
 ---
 
@@ -38,7 +36,7 @@
   - `RecordSessionUseCase` を SwingDetector 利用に改修（3g 点記録 → ウィンドウ切り出し→スイング保存）
   - 旧 `SessionRepository`/`SessionRepositoryImpl`（セッション一括CSV）は削除
   - DoD: ビルド green、シミュレータでスイング検知→CSV保存をログ確認
-- [ ] **P2-T3: Watch — WCSession 逐次転送（F-W5）**
+- [x] **P2-T3: Watch — WCSession 逐次転送（F-W5）** ✅ 2026-07-18
   - 新規: `Domain/Repositories/SwingTransferRepository.swift`（protocol）
   - 新規: `Infrastructure/WCSessionTransferRepository.swift`
     - スイング保存のたび `WCSession.transferFile`（metadata: sessionId, seq, impactAt）
