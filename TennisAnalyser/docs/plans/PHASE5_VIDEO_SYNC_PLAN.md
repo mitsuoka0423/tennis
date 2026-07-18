@@ -1,0 +1,73 @@
+# F-I6 動画同期 実装計画（Phase 5 を前倒し）
+
+> **このドキュメントの目的**: セッション中断後も本ファイルと `git log`・`Logs/` を読めば再開できる状態を保つ。
+> 運用ルールは `docs/plans/PHASE2_PLAN.md` と同じ（タスク完了ごとにビルド green でコミット）。
+
+## Context（なぜ Phase 5 を前倒しするか）
+
+Phase 3 Wave 1（アノテーション基盤）は完成したが、**実データを集め始めると
+「どのスイング記録が実際のどのショットか分からない」**という問題が起きる。
+CSV波形だけでは見分けがつかないため、アノテーション（F-I3）の精度が落ちる。
+
+解決策として、要求2.2・F-I6（スロー動画と波形の同期表示、本来は Phase 5）を前倒しする。
+動画があれば「このスイングはフォアハンドだった」と確実にラベル付けでき、
+Wave 2（Core ML 学習）の学習データ品質が上がる。目的は Phase 3 Wave 1 の成果を実用化すること。
+
+## スコープの絞り込み（意思決定）
+
+- **撮影**: iPhone を三脚固定し、練習セッション中**連続で動画を録画**する
+  （1スイングごとに撮り直すのではなく、Watch のセッションと同様に開始〜終了で1本）
+- **同期方式**: 動画開始時刻（壁時計 `Date`）とスイングの `detectedAt`（壁時計）の差分で
+  動画内の再生位置を計算する。Watch と iPhone は別デバイスのため数百ms程度のズレは起こりうるが、
+  目視でショットを識別する用途では十分（フレーム単位の精度は不要）
+- **「スロー」の実現方法**: 高フレームレート撮影（960/240fps 等）は機種依存が大きく、
+  実機無しでの検証リスクが高いため見送る。**通常撮影 + AVPlayer の再生速度を落とす**
+  （0.25x/0.5x トグル）方式を採用する。将来的に高fps撮影に変更しても同期ロジックは流用できる
+- **音声**: 記録しない（フォーム分析に不要、プライバシー・容量の観点でも不要）
+- **UI構成**: タブを追加し「スイング」（既存）と「録画」（新規、カメラプレビュー+開始/停止）を切り替える。
+  詳細画面は要求通り「上部に動画・下部に波形」を1画面に統合する
+
+## タスク分解
+
+- [ ] **T1: Domain — PracticeVideo エンティティ + VideoStore**
+  - `Domain/PracticeVideo.swift`: id, fileURL, startedAt, endedAt?
+  - `Infrastructure/VideoStore.swift`: 保存先 `Documents/videos/{uuid}.mov` + サイドカー
+    `{uuid}.json`（startedAt/endedAt）。一覧・保存・「指定時刻を含む動画を検索」を提供
+  - DoD: ビルド green、ユニットテスト（時刻マッチングロジック）
+
+- [ ] **T2: Infrastructure — カメラ録画（AVFoundation）**
+  - `Infrastructure/PracticeVideoRecorder.swift`: `AVCaptureSession` + `AVCaptureMovieFileOutput`
+    のラッパー（ObservableObject: isRecording, start()/stop()）
+  - 音声トラックなし（ビデオのみ）、バックグラウンド遷移時は自動停止（データ破損防止）
+  - DoD: ビルド green（実機でのみ実カメラ動作確認可能）
+
+- [ ] **T3: Presentation — 録画タブ**
+  - `RecordingCameraView.swift`: カメラプレビュー（`AVCaptureVideoPreviewLayer` の
+    UIViewRepresentable）+ 開始/停止ボタン + 録画中インジケーター
+  - `TennisAnalyserApp.swift` / ルートビューを `TabView`（スイング / 録画）に変更
+  - DoD: ビルド green
+
+- [ ] **T4: Presentation — 詳細画面への動画統合（F-I6 本体）**
+  - `SwingDetailView` 上部に動画プレイヤー領域を追加。`VideoStore` で該当スイングの
+    `detectedAt` を含む動画を検索し、見つかれば該当位置にシークした `AVPlayer` を表示
+  - 再生/一時停止、スロー再生トグル（0.25x/0.5x/1.0x）
+  - 見つからない場合は「対応する動画がありません」の軽い表示（エラーにしない）
+  - DoD: ビルド green
+
+- [ ] **T5: ドキュメント更新**
+  - REQUIREMENTS.md: F-I6 の TBD（同期方式）を解消し、前倒しの経緯を記録
+  - Logs 追記、本ファイルの完了マーク
+
+## 再開手順
+
+1. 本ファイルのチェックボックスを確認 → `git log --oneline -10`
+2. ビルド確認:
+   `xcodebuild -project TennisAnalyser.xcodeproj -scheme "TennisAnalyser" -destination 'generic/platform=iOS' build`
+3. 未完了の最初のタスクから着手
+
+## 実機検証項目（T1〜T5 完了後）
+
+- カメラ権限ダイアログが出て許可できる
+- 録画開始→数分後に停止→ファイルが保存される
+- 同じセッション中に記録されたスイングの詳細画面で、動画が該当タイミング付近にシークされて表示される
+- スロー再生トグルが機能する
