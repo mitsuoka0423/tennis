@@ -127,3 +127,24 @@ Phase 2 着手前に「CSV 転送で良いのか」という疑問をきっか�
    - 画面消灯中の計測継続テスト（消灯方法の調査から）
    - ビルド warning 4件の解消（`samplingTask` Sendable closure ×2、不要 `await` ×2）
    - バッテリー消費の実測（1時間で20%以下、docs/REQUIREMENTS.md NFR）
+
+---
+
+## 追記: Phase 2 実装（T1〜T6 完了）
+
+中断・再開可能性の保証のため `docs/plans/PHASE2_PLAN.md` を作成し、
+タスク単位でビルド green のチェックポイントコミットを刻む運用で実装。
+
+| タスク | コミット | 内容 |
+|---|---|---|
+| 計画 | b3a81a0 | PHASE2_PLAN.md 策定 |
+| P2-T1 | a898de7 | SwingDetector + Swing エンティティ + テスト8件 (F-W3) |
+| P2-T2 | 3448e51 | SwingRepository（1スイング=1CSV）+ UseCase 改修 (F-W4) |
+| P2-T3 | c3bfaac | WCSession 逐次転送・転送後削除・再送 (F-W5) |
+| P2-T4 | 970fa7e | Watch 簡易表示にスイング数・転送状況 (F-W6) |
+| P2-T5 | bf634fc | iOS 受信ハンドラ + SwingStore (F-I1) |
+| P2-T6 | 49bc672 | iOS 一覧 + Swift Charts 波形表示 (F-I2) |
+
+- ユニットテスト: SwingDetector 8件 + SwingRepositoryImpl 2件、全PASS
+- 波形チャートの3軸色は dataviz バリデータ検証済み（両モードPASS, CVD ΔE 9.5）
+- 残: **P2-T7 実機 E2E 検証**（Watch スイング → 10秒以内に iPhone 一覧 → 波形表示）
