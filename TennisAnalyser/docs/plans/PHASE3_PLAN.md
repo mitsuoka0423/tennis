@@ -11,7 +11,7 @@
 
 ## 現在地
 
-**P3-T1〜T4 完了**（2026-07-19）。次: P3-T5
+**P3-T1〜T5 完了**（2026-07-19）。次: P3-T6（ドキュメント更新・クローズ）
 - T2（アノテーションUI）と T3（フィルタ）は `ContentView.swift` を同時に触るため1コミットにまとめた
 - T4（解析エンジン）は `SwingDetailView` のヘッダー実装（T2）と合わせて実装したため先に完了
 
@@ -95,10 +95,17 @@ Watch 側 `MotionSample.ShotClass` は現状 `FOREHAND/BACKHAND/SERVE/OTHER` の
   - `SwingDetailView` に「簡易指標 (β)」として表示。本格スコアリングは未実装であることを明示
   - ユニットテスト5件、全PASS
 
-- [ ] **P3-T5: iOS — 学習データのエクスポート**
-  - ラベル付きスイングを `ShotClass` ごとのフォルダに整理してエクスポート（共有シート経由で
-    Files app 等に書き出し）。Create ML への具体的な取り込み方法は Wave 2 で設計
-  - DoD: ビルド green、実機で軽く動作確認
+- [x] **P3-T5: iOS — 学習データのエクスポート** ✅ 2026-07-19
+  - `Infrastructure/TrainingDataExporter.swift`: ラベル付きスイングを
+    `<ShotClass>/<sessionId>_<sequence>.csv` に整理 + `manifest.csv`（swingId, sessionId,
+    sequence, shotClass, detectedAt, peakAcceleration）を出力
+  - Why not zip: 独自 ZIP エンコーダは正しさの検証手段が iOS では乏しい（Process が使えない）。
+    `UIActivityViewController` はフォルダ URL をそのまま共有でき Files app の「保存」・AirDrop に
+    対応するため、フォルダ構成のまま共有する方式を採用（1つのファイルにまとめたければ
+    Files app の「圧縮」機能を使う）
+  - `ContentView` に「…」メニューからエクスポート導線を追加（`ShareSheet` = UIActivityViewController ラッパー）
+  - ユニットテスト2件（未ラベル時のエラー、クラス別整理+manifest内容）、全PASS
+  - Create ML への具体的な取り込み方法（スキーマ調査）は Wave 2 で設計
 
 - [ ] **P3-T6: ドキュメント更新**
   - REQUIREMENTS.md の F-W7 TBD 部分を本計画の内容で更新

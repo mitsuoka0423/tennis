@@ -37,6 +37,8 @@ struct ContentView: View {
     @State private var filter: SwingFilter = .all
     @State private var editMode: EditMode = .inactive
     @State private var selection = Set<String>()
+    @State private var exportDirectory: URL?
+    @State private var exportError: String?
 
     var body: some View {
         NavigationStack {
@@ -60,6 +62,33 @@ struct ContentView: View {
             .sheet(isPresented: $showsAxisGuide) {
                 AxisGuideView()
             }
+            .sheet(isPresented: exportDirectoryBinding) {
+                if let exportDirectory {
+                    ShareSheet(items: [exportDirectory])
+                }
+            }
+            .alert("エクスポートできません", isPresented: exportErrorBinding) {
+                Button("OK") { exportError = nil }
+            } message: {
+                Text(exportError ?? "")
+            }
+        }
+    }
+
+    private var exportDirectoryBinding: Binding<Bool> {
+        Binding(get: { exportDirectory != nil }, set: { if !$0 { exportDirectory = nil } })
+    }
+
+    private var exportErrorBinding: Binding<Bool> {
+        Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })
+    }
+
+    /// P3-T5: ラベル付きスイングをクラス別フォルダに整理して共有シートを開く
+    private func exportTrainingData() {
+        do {
+            exportDirectory = try TrainingDataExporter.export(records: store.records)
+        } catch {
+            exportError = error.localizedDescription
         }
     }
 
@@ -118,7 +147,15 @@ struct ContentView: View {
             }
             if !store.records.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("選択") { editMode = .active }
+                    Menu {
+                        Button("選択して一括タグ付け", systemImage: "checklist") { editMode = .active }
+                        Button("学習データをエクスポート", systemImage: "square.and.arrow.up") {
+                            exportTrainingData()
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("その他の操作")
                 }
             }
         }
