@@ -178,29 +178,48 @@ struct ContentView: View {
         )
     }
 
+    /// 編集中と非編集中で `List` の初期化自体を分ける。
+    ///
+    /// Why not: `List(selection:)` と `NavigationLink(value:)` を同じ行に共存させると、
+    /// タップが選択に吸収されナビゲーションが発火しない（編集モードでなくても再現する）。
+    /// 選択機能が要るのは一括タグ付け中のみなので、非選択時は選択なしの通常の List にする。
+    @ViewBuilder
     private var swingList: some View {
-        List(selection: $selection) {
-            ForEach(sessionGroups, id: \.sessionId) { group in
-                Section(header: Text(sessionTitle(group))) {
-                    ForEach(group.records) { record in
-                        if editMode == .active {
-                            SwingRow(record: record)
-                        } else {
-                            NavigationLink(value: record.id) {
-                                SwingRow(record: record)
-                            }
-                        }
-                    }
-                    .onDelete { offsets in
-                        offsets.map { group.records[$0] }.forEach(store.delete)
+        if editMode == .active {
+            List(selection: $selection) {
+                sessionSections { record in
+                    SwingRow(record: record)
+                }
+            }
+        } else {
+            List {
+                sessionSections { record in
+                    NavigationLink(value: record.id) {
+                        SwingRow(record: record)
                     }
                 }
             }
+            .navigationDestination(for: String.self) { recordId in
+                SwingDetailView(recordId: recordId)
+            }
+            .refreshable { store.reload() }
         }
-        .navigationDestination(for: String.self) { recordId in
-            SwingDetailView(recordId: recordId)
+    }
+
+    @ViewBuilder
+    private func sessionSections<Row: View>(
+        @ViewBuilder row: @escaping (SwingRecord) -> Row
+    ) -> some View {
+        ForEach(sessionGroups, id: \.sessionId) { group in
+            Section(header: Text(sessionTitle(group))) {
+                ForEach(group.records) { record in
+                    row(record)
+                }
+                .onDelete { offsets in
+                    offsets.map { group.records[$0] }.forEach(store.delete)
+                }
+            }
         }
-        .refreshable { store.reload() }
     }
 
     // MARK: - Grouping
