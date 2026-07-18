@@ -2,100 +2,205 @@
 //  VideoStore.swift
 //  TennisAnalyser (iOS)
 //
-//  Infrastructure — 練習動画の永続保管と時刻マッチング（F-I6）
+//  Infrastructure — 練習動画の永続保管・スイング単位クリップ生成（F-I6）
+//
+//  Why not 壁時計マッチングをクリップにも使う: v1 はスイング詳細画面の表示のたびに
+//  「継続録画のどれに該当するか」を壁時計時刻で検索していたが、Watch の sessionId が
+//  iPhone にも伝わるようになった（V-T6）ため、クリップは `{sessionId}/{sequence}.mov` に
+//  固定パスで保存する。CSV（Documents/swings/{sessionId}/{sequence}.csv）と対称的なレイアウトにより、
+//  検索ロジック自体が不要になった。
 
 import Foundation
+import AVFoundation
 import Combine
 
 /// 練習動画の保管庫
 ///
-/// - 保存先: `Documents/videos/{uuid}.mov` + サイドカー `Documents/videos/{uuid}.json`
-///   （メタデータを動画本体と分離。動画は AVCaptureMovieFileOutput が直接書き出すため、
-///   メタデータだけを別ファイルにする方が録画コードをシンプルに保てる）
+/// - **継続録画（中間データ）**: `Documents/video_sources/{sessionId}.mov` + `.json`
+///   （Watch の sessionId をそのまま識別子に使う）
+/// - **スイング単位クリップ（最終データ）**: `Documents/videos/{sessionId}/{sequence}.mov`
 @MainActor
 final class VideoStore: ObservableObject {
 
-    @Published private(set) var videos: [PracticeVideo] = []
+    /// 生成済みクリップの識別子集合（"{sessionId}_{sequence}"）。
+    /// SwiftUI に変更を伝えるための Published プロパティ（ディスクの実体は都度確認しない）
+    @Published private(set) var availableClipKeys: Set<String> = []
+
+    /// 継続録画（中間データ）の一覧
+    private(set) var sources: [PracticeVideo] = []
 
     private let fileManager = FileManager.default
 
-    private var videosDirectory: URL {
-        get throws {
-            let docs = try fileManager.url(
-                for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true
-            )
-            let dir = docs.appendingPathComponent("videos", isDirectory: true)
-            if !fileManager.fileExists(atPath: dir.path) {
-                try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
-            }
-            return dir
-        }
+    /// クリップの前後窓（秒）。`VideoSyncPlayerView` の相対時間計算と一致させること。
+    static let preRollSeconds = 2.0
+    static let postRollSeconds = 2.0
+
+    private var sourcesDirectory: URL {
+        get throws { try makeDirectory("video_sources") }
     }
 
-    // MARK: - Public API
+    private var clipsDirectory: URL {
+        get throws { try makeDirectory("videos") }
+    }
 
-    /// ディスクを再スキャンして一覧を更新する
+    private func makeDirectory(_ name: String) throws -> URL {
+        let docs = try fileManager.url(
+            for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true
+        )
+        let dir = docs.appendingPathComponent(name, isDirectory: true)
+        if !fileManager.fileExists(atPath: dir.path) {
+            try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir
+    }
+
+    // MARK: - Public API (source recordings)
+
+    /// ディスクを再スキャンして継続録画一覧・クリップ一覧を更新する
     func reload() {
+        reloadSources()
+        reloadClipKeys()
+    }
+
+    private func reloadSources() {
         do {
-            let dir = try videosDirectory
+            let dir = try sourcesDirectory
             let files = try fileManager.contentsOfDirectory(
                 at: dir, includingPropertiesForKeys: nil, options: .skipsHiddenFiles
             )
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            videos = files
+            sources = files
                 .filter { $0.pathExtension == "json" }
                 .compactMap { url -> PracticeVideo? in
                     guard let data = try? Data(contentsOf: url) else { return nil }
                     return try? decoder.decode(PracticeVideo.self, from: data)
                 }
-                .sorted { $0.startedAt > $1.startedAt }
         } catch {
-            print("[VideoStore] reload error: \(error)")
+            print("[VideoStore] reloadSources error: \(error)")
         }
     }
 
-    /// 新しい録画の保存先ファイル URL を発行する（録画開始時に呼ぶ）
-    func newRecordingURL() throws -> (id: String, url: URL) {
-        let id = UUID().uuidString
-        let url = try videosDirectory.appendingPathComponent("\(id).mov")
-        return (id, url)
+    private func reloadClipKeys() {
+        guard let dir = try? clipsDirectory else { return }
+        guard let sessionDirs = try? fileManager.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil, options: .skipsHiddenFiles
+        ) else { return }
+        var keys = Set<String>()
+        for sessionDir in sessionDirs where sessionDir.hasDirectoryPath {
+            let sessionId = sessionDir.lastPathComponent
+            let clips = (try? fileManager.contentsOfDirectory(
+                at: sessionDir, includingPropertiesForKeys: nil, options: .skipsHiddenFiles
+            )) ?? []
+            for clip in clips where clip.pathExtension == "mov" {
+                let sequence = clip.deletingPathExtension().lastPathComponent
+                keys.insert("\(sessionId)_\(sequence)")
+            }
+        }
+        availableClipKeys = keys
     }
 
-    /// 録画完了時にメタデータを保存する
-    func saveMetadata(_ video: PracticeVideo) {
+    /// 新しい継続録画の保存先ファイル URL を発行する（録画開始時に呼ぶ）
+    func newSourceRecordingURL(sessionId: String) throws -> URL {
+        try sourcesDirectory.appendingPathComponent("\(sessionId).mov")
+    }
+
+    /// 継続録画の完了時にメタデータを保存する
+    func saveSourceMetadata(_ video: PracticeVideo) {
         do {
-            let dir = try videosDirectory
+            let dir = try sourcesDirectory
             let url = dir.appendingPathComponent("\(video.id).json")
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             let data = try encoder.encode(video)
             try data.write(to: url, options: .atomic)
-            reload()
+            reloadSources()
         } catch {
-            print("[VideoStore] saveMetadata error: \(error)")
+            print("[VideoStore] saveSourceMetadata error: \(error)")
         }
     }
 
-    /// `date` を録画範囲に含む動画を探す（F-I6: スイングに対応する動画の検索）
-    func video(containing date: Date) -> PracticeVideo? {
-        videos.first { $0.contains(date) }
+    /// 継続録画（中間データ）を削除する（セッション終了から猶予後のクリーンアップ用）
+    func deleteSource(sessionId: String) {
+        guard let dir = try? sourcesDirectory else { return }
+        try? fileManager.removeItem(at: dir.appendingPathComponent("\(sessionId).mov"))
+        try? fileManager.removeItem(at: dir.appendingPathComponent("\(sessionId).json"))
+        reloadSources()
     }
 
-    /// 動画ファイルの絶対 URL を返す
-    func fileURL(for video: PracticeVideo) throws -> URL {
-        try videosDirectory.appendingPathComponent(video.fileName)
+    // MARK: - Public API (per-swing clips)
+
+    /// スイング単位クリップの URL（存在するとは限らない）
+    func clipURL(sessionId: String, sequence: Int) throws -> URL {
+        try clipsDirectory
+            .appendingPathComponent(sessionId, isDirectory: true)
+            .appendingPathComponent("\(sequence).mov")
     }
 
-    /// 動画を削除する
-    func delete(_ video: PracticeVideo) {
+    /// クリップが生成済みか
+    func hasClip(sessionId: String, sequence: Int) -> Bool {
+        availableClipKeys.contains("\(sessionId)_\(sequence)")
+    }
+
+    /// スイングに対応するクリップが無ければ、継続録画から切り出して生成する
+    ///
+    /// - Parameters:
+    ///   - sessionId/sequence: スイングの識別子（CSV と同じキー）
+    ///   - detectedAt: スイングのインパクト壁時計時刻
+    func extractClipIfNeeded(sessionId: String, sequence: Int, detectedAt: Date?) async {
+        guard !hasClip(sessionId: sessionId, sequence: sequence) else { return }
+        guard let detectedAt else { return }
+        guard let source = sources.first(where: { $0.id == sessionId }) else {
+            // 継続録画が見つからない（録画していなかった等）。F-I6 は無くても支障ない機能なので黙って諦める
+            return
+        }
+        guard let sourceURL = try? sourcesDirectory.appendingPathComponent("\(source.id).mov"),
+              fileManager.fileExists(atPath: sourceURL.path)
+        else { return }
+        // 録画中（endedAt 未確定）は正しい範囲が定まらないため、確定後の reload で再試行される
+        guard let offset = source.offsetSeconds(for: detectedAt) else { return }
+
+        let startSeconds = max(0, offset - Self.preRollSeconds)
+        let endSeconds = offset + Self.postRollSeconds
+
         do {
-            let dir = try videosDirectory
-            try? fileManager.removeItem(at: dir.appendingPathComponent(video.fileName))
-            try? fileManager.removeItem(at: dir.appendingPathComponent("\(video.id).json"))
-            reload()
+            let destURL = try clipURL(sessionId: sessionId, sequence: sequence)
+            let destDir = destURL.deletingLastPathComponent()
+            if !fileManager.fileExists(atPath: destDir.path) {
+                try fileManager.createDirectory(at: destDir, withIntermediateDirectories: true)
+            }
+            try await exportClip(from: sourceURL, to: destURL, startSeconds: startSeconds, endSeconds: endSeconds)
+            reloadClipKeys()
+            print("[VideoStore] clip extracted: \(sessionId)/\(sequence).mov")
         } catch {
-            print("[VideoStore] delete error: \(error)")
+            print("[VideoStore] extractClip error: \(error)")
+        }
+    }
+
+    private func exportClip(from sourceURL: URL, to destURL: URL, startSeconds: Double, endSeconds: Double) async throws {
+        if fileManager.fileExists(atPath: destURL.path) {
+            try fileManager.removeItem(at: destURL)
+        }
+        let asset = AVURLAsset(url: sourceURL)
+        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
+            throw VideoExportError.exportSessionUnavailable
+        }
+        export.timeRange = CMTimeRange(
+            start: CMTime(seconds: startSeconds, preferredTimescale: 600),
+            end: CMTime(seconds: endSeconds, preferredTimescale: 600)
+        )
+        try await export.export(to: destURL, as: .mov)
+    }
+}
+
+enum VideoExportError: LocalizedError {
+    case exportSessionUnavailable
+    case exportFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .exportSessionUnavailable: return "動画の書き出しを準備できませんでした。"
+        case .exportFailed: return "動画の書き出しに失敗しました。"
         }
     }
 }

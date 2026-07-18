@@ -8,6 +8,10 @@
 //  検証リスクが高い。まずは通常撮影＋再生速度変更（SwingDetailView 側）で
 //  「スロー」を実現し、必要になれば高fpsフォーマットへ切り替える
 //  （録画・同期の仕組みはそのまま流用できる設計にしている）。
+//
+//  Why not 手動の開始/停止ボタン: Watch のセッション開始/終了に連動して
+//  自動的に録画する（V-T6/T7）。ユーザーが iPhone を三脚固定したあとに
+//  操作するのはカメラ権限の許可のみで済む。
 
 import AVFoundation
 import Combine
@@ -20,7 +24,7 @@ enum CameraPermissionState {
     case denied
 }
 
-/// 練習セッション中の連続動画録画を管理する
+/// 練習セッション中の連続動画録画を管理する（Watch からの通知で自動的に開始/停止する）
 ///
 /// - 音声トラックは録音しない（フォーム分析に不要）
 /// - アプリがバックグラウンドへ遷移した場合は自動停止する（ファイル破損防止）
@@ -38,7 +42,7 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
     private var isConfigured = false
 
     private let videoStore: VideoStore
-    private var pendingVideoId: String?
+    private var pendingSessionId: String?
     private var recordingStartedAt: Date?
 
     init(videoStore: VideoStore) {
@@ -103,15 +107,15 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Recording
+    // MARK: - Recording（Watch からのセッション通知で呼ばれる。F-I6）
 
-    func startRecording() {
+    func startRecording(sessionId: String) {
         guard !isRecording, permissionState == .granted else { return }
-        guard let (id, url) = try? videoStore.newRecordingURL() else {
+        guard let url = try? videoStore.newSourceRecordingURL(sessionId: sessionId) else {
             errorMessage = "保存先を作成できませんでした。"
             return
         }
-        pendingVideoId = id
+        pendingSessionId = sessionId
         sessionQueue.async { [movieOutput] in
             movieOutput.startRecording(to: url, recordingDelegate: self)
         }
@@ -142,7 +146,7 @@ extension PracticeVideoRecorder: AVCaptureFileOutputRecordingDelegate {
         didStartRecordingTo fileURL: URL,
         from connections: [AVCaptureConnection]
     ) {
-        // 実際に録画が始まった時刻を起点にする（ボタン押下〜開始のラグを除くため）
+        // 実際に録画が始まった時刻を起点にする（通知〜開始のラグを除くため）
         let startedAt = Date()
         Task { @MainActor in
             self.recordingStartedAt = startedAt
@@ -159,8 +163,8 @@ extension PracticeVideoRecorder: AVCaptureFileOutputRecordingDelegate {
         let endedAt = Date()
         Task { @MainActor in
             self.isRecording = false
-            guard let id = self.pendingVideoId, let startedAt = self.recordingStartedAt else { return }
-            self.pendingVideoId = nil
+            guard let sessionId = self.pendingSessionId, let startedAt = self.recordingStartedAt else { return }
+            self.pendingSessionId = nil
             self.recordingStartedAt = nil
 
             if let error {
@@ -175,10 +179,10 @@ extension PracticeVideoRecorder: AVCaptureFileOutputRecordingDelegate {
             }
 
             let video = PracticeVideo(
-                id: id, startedAt: startedAt, endedAt: endedAt,
+                id: sessionId, startedAt: startedAt, endedAt: endedAt,
                 fileName: outputFileURL.lastPathComponent
             )
-            self.videoStore.saveMetadata(video)
+            self.videoStore.saveSourceMetadata(video)
         }
     }
 }

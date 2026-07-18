@@ -18,12 +18,21 @@ struct TennisAnalyserApp: App {
     init() {
         let store = SwingStore()
         let videoStore = VideoStore()
+        let recorder = PracticeVideoRecorder(videoStore: videoStore)
         _store = StateObject(wrappedValue: store)
         _videoStore = StateObject(wrappedValue: videoStore)
         // recorder は videoStore と同一インスタンスを共有する必要があるため App 側で生成する
         // （RecordingCameraView の init 内では @EnvironmentObject がまだ解決できないため）
-        _recorder = StateObject(wrappedValue: PracticeVideoRecorder(videoStore: videoStore))
-        sessionManager = PhoneSessionManager(store: store)
+        _recorder = StateObject(wrappedValue: recorder)
+
+        // F-I6: スイング受信のたびに対応する動画クリップを自動生成する
+        store.onIngested = { [weak videoStore] record in
+            Task { await videoStore?.extractClipIfNeeded(
+                sessionId: record.sessionId, sequence: record.sequence, detectedAt: record.detectedAt
+            ) }
+        }
+
+        sessionManager = PhoneSessionManager(store: store, videoStore: videoStore, recorder: recorder)
         sessionManager.activate()
     }
 

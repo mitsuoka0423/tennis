@@ -56,22 +56,32 @@ CSV が `F-W4: 1スイング=1ファイル` なのと対称的に、**動画も1
   - `WCSessionTransferRepository`: `updateApplicationContext` で通知
   - `WorkoutViewModel`: start/stop 時に呼び出す（stop時はセッション終了前にIDを退避）
 
-- [ ] **T7: iOS — 録画の自動トリガー化**
+- [x] **T7: iOS — 録画の自動トリガー化** ✅ 2026-07-18
   - `PhoneSessionManager` に `didReceiveApplicationContext` を実装し `PracticeVideoRecorder` を制御
   - `PracticeVideoRecorder.startRecording(sessionId:)` に変更（sessionId をそのまま動画IDに使う）
   - `RecordingCameraView`: 手動ボタンを削除、状態表示（自動録画中/待機中）のみに
 
-- [ ] **T8: iOS — スイング単位クリップ自動生成**
-  - `VideoStore`: 継続録画（video_sources）とクリップ（videos/{sessionId}/{sequence}.mov）を分離
-  - `extractClipIfNeeded(sessionId:sequence:detectedAt:)`: `AVAssetExportSession` で前後2秒を切り出し
-  - `PhoneSessionManager.didReceive file:` でスイング受信のたびにクリップ生成をキック
-  - セッション終了通知から猶予後に継続録画を削除
+- [x] **T8: iOS — スイング単位クリップ自動生成** ✅ 2026-07-18
+  - `VideoStore`: 継続録画（video_sources/{sessionId}.mov+json）とクリップ
+    （videos/{sessionId}/{sequence}.mov）を分離
+  - `extractClipIfNeeded(sessionId:sequence:detectedAt:)`: `AVAssetExportSession.export(to:as:)`
+    （新しい async API）で前後2秒を切り出し
+  - `SwingStore.onIngested` フックを新設し、スイング受信のたびにクリップ生成をキック
+    （App 側で配線。SwingStore/VideoStore の疎結合を維持）
+  - `PhoneSessionManager`: セッション終了通知から60秒後に未処理スイングを処理してから
+    継続録画を削除（F-W5 の転送目安10秒に対し十分な猶予）
 
-- [ ] **T9: iOS — VideoSyncPlayerView 刷新（I-3/I-4）**
+- [x] **T9: iOS — VideoSyncPlayerView 刷新（I-3/I-4）** ✅ 2026-07-18
   - クリップ直再生（壁時計シーク不要、0秒始まり・クリップ全体をループ）
-  - シークバー（Slider）追加
-  - 再生位置を `relativeTimeSec` としてバインディングで公開
-  - `SwingDetailView`: 波形グラフに再生位置の `RuleMark` を重ねる
+  - シークバー（Slider、editingChanged でスクラブ中は自動ループ用の再生を止める）
+  - 再生位置を `relativeTimeSec`（インパクトからの相対秒）としてバインディングで公開
+  - `SwingDetailView`: 波形グラフに再生位置のオレンジ `RuleMark` を重ねる
+
+  Why not（設計変更の理由）: v1 は継続録画をスイング詳細表示のたびに壁時計時刻で検索していたが、
+  Watch の sessionId が iPhone にも伝わるようになった（T6）ため、クリップを
+  `{sessionId}/{sequence}.mov` の固定パスに保存する方式に変更。CSV と対称的なレイアウトにより
+  検索ロジックが不要になり、クリップの再生開始位置（0秒）がそのままインパクト前2秒の
+  ウィンドウ開始と一致するため、シーク計算も不要になった。
 
 - [ ] **T10: ドキュメント更新**
 

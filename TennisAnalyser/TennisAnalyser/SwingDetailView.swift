@@ -18,6 +18,8 @@ struct SwingDetailView: View {
     @State private var samples: [SwingSamplePoint] = []
     @State private var isLoading = true
     @State private var showsAxisGuide = false
+    /// 動画の再生位置（インパクトからの相対秒）。I-4: 波形グラフの同期線に使う
+    @State private var videoRelativeTimeSec: Double?
 
     private var record: SwingRecord? {
         store.records.first { $0.id == recordId }
@@ -103,23 +105,18 @@ struct SwingDetailView: View {
 
     // MARK: - Video (F-I6)
 
-    /// `record.detectedAt` を含む動画とインパクトの再生位置（秒）
-    private func matchedVideo(for record: SwingRecord) -> (video: PracticeVideo, offsetSeconds: Double)? {
-        guard let detectedAt = record.detectedAt,
-              let video = videoStore.video(containing: detectedAt),
-              let offset = video.offsetSeconds(for: detectedAt)
-        else { return nil }
-        return (video, offset)
-    }
-
     @ViewBuilder
     private func videoSection(for record: SwingRecord) -> some View {
-        if let match = matchedVideo(for: record) {
-            VideoSyncPlayerView(video: match.video, impactOffsetSeconds: match.offsetSeconds)
+        if videoStore.hasClip(sessionId: record.sessionId, sequence: record.sequence) {
+            VideoSyncPlayerView(
+                sessionId: record.sessionId,
+                sequence: record.sequence,
+                relativeTimeSec: $videoRelativeTimeSec
+            )
         } else {
             HStack(spacing: 6) {
                 Image(systemName: "video.slash")
-                Text("対応する動画がありません")
+                Text("対応する動画がありません（生成中の場合は少し待ってから再読み込みしてください）")
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -254,6 +251,13 @@ struct SwingDetailView: View {
                 RuleMark(x: .value("インパクト", 0.0))
                     .foregroundStyle(.gray.opacity(0.5))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+
+                // I-4: 動画の再生位置を示す同期線
+                if let videoRelativeTimeSec {
+                    RuleMark(x: .value("再生位置", videoRelativeTimeSec))
+                        .foregroundStyle(.orange)
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
+                }
 
                 ForEach(points) { point in
                     LineMark(

@@ -17,6 +17,9 @@ final class SwingStore: ObservableObject {
 
     @Published private(set) var records: [SwingRecord] = []
 
+    /// スイングの取り込み完了フック（F-I6: VideoStore のクリップ生成トリガーに使う）
+    var onIngested: ((SwingRecord) -> Void)?
+
     private let fileManager = FileManager.default
 
     private var swingsDirectory: URL {
@@ -87,8 +90,15 @@ final class SwingStore: ObservableObject {
             try fm.moveItem(at: tempURL, to: dest)
             print("[SwingStore] ingested \(sessionId)/\(dest.lastPathComponent)")
 
+            // 移動後のファイルから確定情報を読み直す（メタデータの欠損に強くするため。
+            // 再送時は sessionId/sequence のみしか metadata に無いことがあるが、
+            // CSV ヘッダーには常に全情報が入っている）
+            let record = SwingCSVParser.parseMetadata(fileURL: dest)
             Task { @MainActor in
                 self.reload()
+                if let record {
+                    self.onIngested?(record)
+                }
             }
         } catch {
             print("[SwingStore] ingest error: \(error)")

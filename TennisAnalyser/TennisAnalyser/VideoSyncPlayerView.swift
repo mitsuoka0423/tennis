@@ -2,30 +2,33 @@
 //  VideoSyncPlayerView.swift
 //  TennisAnalyser
 //
-//  Presentation — スイングに対応する動画をシークして表示する（F-I6 本体）
+//  Presentation — スイング単位クリップの再生（F-I6 本体、I-3 シークバー・I-4 グラフ同期）
+//
+//  Why not 壁時計シーク: v1 は継続録画から都度シークしていたが、クリップ自体が
+//  既にインパクト前後の窓（VideoStore.preRoll/postRollSeconds）で切り出し済みのため、
+//  クリップの先頭（0秒）＝ウィンドウ開始として単純に頭から再生すればよい。
 
 import SwiftUI
 import AVKit
 
-/// 該当スイング付近（インパクトの前後）を切り出して再生するプレイヤー
-///
-/// Why not 正確なウィンドウ幅: スイングの pre/post 秒数は Watch 側で調整可能（F-W3）だが、
-/// この動画同期は「目視でショットを確認する」用途のため、デフォルト値（前後2秒）を
-/// 固定で使う近似で十分と判断した。ズレても目視確認には支障がない。
 struct VideoSyncPlayerView: View {
 
-    let video: PracticeVideo
-    /// スイング（インパクト）に対応する動画内の再生位置（秒）
-    let impactOffsetSeconds: Double
+    let sessionId: String
+    let sequence: Int
+    /// 再生位置をインパクトからの相対秒として親（波形グラフ）へ公開する（I-4）
+    @Binding var relativeTimeSec: Double?
 
     @EnvironmentObject private var videoStore: VideoStore
     @State private var player: AVPlayer?
     @State private var rate: Float = 0.5
     @State private var isPlaying = false
-    @State private var boundaryObserver: Any?
+    @State private var duration: Double = 0
+    @State private var currentTime: Double = 0
+    @State private var isScrubbing = false
+    @State private var timeObserver: Any?
+    @State private var endObserver: NSObjectProtocol?
+    @State private var loadError = false
 
-    private static let preRollSeconds = 2.0
-    private static let postRollSeconds = 2.0
     private static let availableRates: [Float] = [0.25, 0.5, 1.0]
 
     var body: some View {
@@ -40,7 +43,10 @@ struct VideoSyncPlayerView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .onDisappear { teardown(player: player) }
 
+                seekBar
                 controls
+            } else if loadError {
+                EmptyView()  // クリップ未生成: SwingDetailView 側で「動画がありません」を表示
             } else {
                 ProgressView()
                     .frame(height: 220)
@@ -48,6 +54,38 @@ struct VideoSyncPlayerView: View {
             }
         }
         .task { await setUpPlayer() }
+    }
+
+    // MARK: - Seek Bar (I-3)
+
+    private var seekBar: some View {
+        VStack(spacing: 2) {
+            Slider(
+                value: $currentTime,
+                in: 0...max(duration, 0.01),
+                onEditingChanged: { editing in
+                    isScrubbing = editing
+                    if editing {
+                        player?.rate = 0
+                    } else {
+                        seek(to: currentTime)
+                        if isPlaying { player?.rate = rate }
+                    }
+                }
+            )
+            HStack {
+                Text(timeString(currentTime))
+                Spacer()
+                Text(timeString(duration))
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+        }
+    }
+
+    private func timeString(_ seconds: Double) -> String {
+        String(format: "%.2fs", seconds)
     }
 
     // MARK: - Controls
@@ -79,30 +117,46 @@ struct VideoSyncPlayerView: View {
     // MARK: - Setup
 
     private func setUpPlayer() async {
-        guard let fileURL = try? videoStore.fileURL(for: video) else { return }
-        let item = AVPlayerItem(url: fileURL)
+        guard let fileURL = try? videoStore.clipURL(sessionId: sessionId, sequence: sequence),
+              FileManager.default.fileExists(atPath: fileURL.path)
+        else {
+            loadError = true
+            return
+        }
+
+        let asset = AVURLAsset(url: fileURL)
+        let item = AVPlayerItem(asset: asset)
         let newPlayer = AVPlayer(playerItem: item)
         newPlayer.isMuted = true  // 音声トラックは録音していないが念のため
 
-        let startSeconds = max(0, impactOffsetSeconds - Self.preRollSeconds)
-        let endSeconds = impactOffsetSeconds + Self.postRollSeconds
-        let startTime = CMTime(seconds: startSeconds, preferredTimescale: 600)
-        let endTime = CMTime(seconds: endSeconds, preferredTimescale: 600)
+        duration = (try? await asset.load(.duration).seconds) ?? 0
 
-        await newPlayer.seek(to: startTime, toleranceBefore: .zero, toleranceAfter: .zero)
-
-        // インパクト前後の短い区間だけをループ再生する（目視確認しやすいように）
-        let observer = newPlayer.addBoundaryTimeObserver(
-            forTimes: [NSValue(time: endTime)], queue: .main
-        ) {
-            newPlayer.seek(to: startTime, toleranceBefore: .zero, toleranceAfter: .zero)
+        // クリップ全体をループ再生する
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
+        ) { _ in
+            newPlayer.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
             newPlayer.rate = rate
         }
-        boundaryObserver = observer
+
+        // I-4: 再生位置を波形グラフ同期用に公開する
+        let interval = CMTime(seconds: 0.03, preferredTimescale: 600)
+        timeObserver = newPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { time in
+            guard !isScrubbing else { return }
+            let seconds = time.seconds
+            currentTime = seconds
+            relativeTimeSec = seconds - VideoStore.preRollSeconds
+        }
 
         player = newPlayer
         newPlayer.rate = rate
         isPlaying = true
+    }
+
+    private func seek(to seconds: Double) {
+        let time = CMTime(seconds: seconds, preferredTimescale: 600)
+        player?.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+        relativeTimeSec = seconds - VideoStore.preRollSeconds
     }
 
     private func togglePlayPause() {
@@ -116,9 +170,13 @@ struct VideoSyncPlayerView: View {
     }
 
     private func teardown(player: AVPlayer) {
-        if let boundaryObserver {
-            player.removeTimeObserver(boundaryObserver)
+        if let timeObserver {
+            player.removeTimeObserver(timeObserver)
+        }
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
         }
         player.pause()
+        relativeTimeSec = nil
     }
 }

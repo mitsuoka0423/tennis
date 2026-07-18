@@ -3,7 +3,8 @@
 //  TennisAnalyser
 //
 //  Presentation — 練習セッションの連続動画録画（F-I6）
-//  三脚固定した iPhone でこの画面を開いたまま練習し、開始/停止のみ操作する想定。
+//  三脚固定した iPhone でこの画面を開いたままにしておくだけでよい。
+//  Watch の計測開始/停止に連動して自動的に録画される（手動の開始/停止ボタンは無い）。
 
 import SwiftUI
 import AVFoundation
@@ -29,6 +30,9 @@ struct RecordingCameraView: View {
             }
         }
         .onAppear { recorder.prepare() }
+        .onChange(of: recorder.isRecording) { _, isRecording in
+            if isRecording { startTimer() } else { stopTimer() }
+        }
         .alert("エラー", isPresented: errorBinding) {
             Button("OK") {}
         } message: {
@@ -44,21 +48,20 @@ struct RecordingCameraView: View {
                 .ignoresSafeArea()
 
             VStack {
-                if recorder.isRecording {
-                    recordingBadge
-                        .padding(.top, 12)
-                }
+                statusBadge
+                    .padding(.top, 12)
                 Spacer()
-                recordButton
-                    .padding(.bottom, 32)
             }
         }
     }
 
-    private var recordingBadge: some View {
+    /// 自動録画の状態表示（手動ボタンは無い。Watch の計測開始/停止に連動する）
+    private var statusBadge: some View {
         HStack(spacing: 6) {
-            Circle().fill(.red).frame(width: 10, height: 10)
-            Text(elapsedTimeString)
+            Circle()
+                .fill(recorder.isRecording ? .red : .gray)
+                .frame(width: 10, height: 10)
+            Text(recorder.isRecording ? "自動録画中 \(elapsedTimeString)" : "待機中（Watchで計測を開始すると自動的に録画します）")
                 .font(.system(.body, design: .monospaced).weight(.semibold))
                 .foregroundStyle(.white)
         }
@@ -66,32 +69,6 @@ struct RecordingCameraView: View {
         .padding(.vertical, 8)
         .background(.black.opacity(0.5))
         .clipShape(Capsule())
-    }
-
-    private var recordButton: some View {
-        Button {
-            if recorder.isRecording {
-                recorder.stopRecording()
-                stopTimer()
-            } else {
-                recorder.startRecording()
-                startTimer()
-            }
-        } label: {
-            ZStack {
-                Circle()
-                    .stroke(.white, lineWidth: 4)
-                    .frame(width: 76, height: 76)
-                if recorder.isRecording {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(.red)
-                        .frame(width: 30, height: 30)
-                } else {
-                    Circle().fill(.red).frame(width: 62, height: 62)
-                }
-            }
-        }
-        .accessibilityLabel(recorder.isRecording ? "録画停止" : "録画開始")
     }
 
     private var elapsedTimeString: String {
