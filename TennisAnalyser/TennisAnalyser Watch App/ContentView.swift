@@ -108,48 +108,39 @@ private struct RecordingView: View {
     @ObservedObject var viewModel: WorkoutViewModel
 
     var body: some View {
-        VStack(spacing: 8) {
-            // 録音中インジケーター
+        // W-1: 停止ボタンの見切れ防止のため縦方向を圧縮
+        // （インジケーター+経過時間を1行、Hz+ロス率を1行に集約）
+        VStack(spacing: 6) {
+            // 計測インジケーター + 経過時間
             HStack(spacing: 6) {
                 Circle()
                     .fill(.red)
-                    .frame(width: 10, height: 10)
-                    .opacity(Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 1) < 0.5 ? 1 : 0.3)
-                Text("計測中")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .frame(width: 8, height: 8)
+                Text(viewModel.elapsedTimeString)
+                    .font(.system(size: 28, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white)
             }
 
-            // 経過時間
-            Text(viewModel.elapsedTimeString)
-                .font(.system(size: 36, weight: .bold, design: .monospaced))
-                .foregroundStyle(.white)
-
-            // スイング数 / 転送状況 / 実測Hz / ロス率（F-W6: 動作確認用の簡易表示）
+            // スイング数(転送状況込み) / レート(Hz・ロス率)
             VStack(spacing: 2) {
-                // スイング数と転送状況を1行に集約（W-1: 停止ボタンの見切れ防止）
                 StatRow(
                     label: "スイング",
                     value: swingStatValue,
                     valueColor: .green
                 )
                 StatRow(
-                    label: "実測Hz",
+                    label: "レート",
                     value: viewModel.measuredHz > 0
-                        ? String(format: "%.0f Hz", viewModel.measuredHz)
-                        : "---"
-                )
-                StatRow(
-                    label: "ロス率",
-                    value: viewModel.measuredHz > 0
-                        ? viewModel.lossRateString
+                        ? String(format: "%.0fHz・%@", viewModel.measuredHz, viewModel.lossRateString)
                         : "---",
-                    valueColor: lossRateColor(viewModel.lossRate)
+                    valueColor: viewModel.measuredHz > 0
+                        ? lossRateColor(viewModel.lossRate)
+                        : .white
                 )
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, 2)
 
-            Spacer()
+            Spacer(minLength: 4)
 
             Button {
                 viewModel.stop()
@@ -158,13 +149,14 @@ private struct RecordingView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 8)
                     .background(.red)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             .buttonStyle(.plain)
         }
-        .padding()
+        .padding(.horizontal)
+        .padding(.vertical, 6)
     }
 
     /// スイング数と転送状況の1行表示

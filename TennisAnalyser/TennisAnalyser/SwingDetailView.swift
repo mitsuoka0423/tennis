@@ -6,6 +6,7 @@
 
 import SwiftUI
 import Charts
+import RealityKit
 
 struct SwingDetailView: View {
 
@@ -173,33 +174,50 @@ enum AxisPalette {
 }
 
 /// Apple Watch の座標軸を図解するシート
+///
+/// - 3D モデル（RealityKit）をドラッグで回転して、どの装着向きでも軸を確認できる
+/// - 軸は Watch 画面基準のため、リューズの左右・腕の向きに依らず不変であることを明記
 struct AxisGuideView: View {
 
     @Environment(\.dismiss) private var dismiss
+    /// 装着スタイル（ユーザーは右腕・リューズ左が既定）
+    @State private var crownOnLeft = true
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
-                    WatchAxisDiagram()
-                        .frame(width: 240, height: 280)
-                        .padding(.top, 8)
+                VStack(spacing: 20) {
+                    Picker("装着スタイル", selection: $crownOnLeft) {
+                        Text("リューズ左（右腕）").tag(true)
+                        Text("リューズ右（左腕）").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+
+                    VStack(spacing: 6) {
+                        Watch3DAxisView(crownOnLeft: crownOnLeft)
+                            .frame(height: 300)
+                            .background(Color(.secondarySystemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                        Label("ドラッグで回転できます", systemImage: "rotate.3d")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
 
                     VStack(alignment: .leading, spacing: 12) {
                         axisRow(
                             color: AxisPalette.x,
                             title: "X 軸",
-                            detail: "画面の右方向（文字盤を正面に見てリューズ側）が +X"
+                            detail: "画面を正面から見て右の方向が +X"
                         )
                         axisRow(
                             color: AxisPalette.y,
                             title: "Y 軸",
-                            detail: "画面の上方向（12時方向・バンド上側）が +Y"
+                            detail: "画面の上（12時）方向が +Y"
                         )
                         axisRow(
                             color: AxisPalette.z,
                             title: "Z 軸",
-                            detail: "画面から手前（顔側）に向かう方向が +Z"
+                            detail: "画面から顔側へ垂直に出る方向が +Z"
                         )
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -208,9 +226,10 @@ struct AxisGuideView: View {
                         Text("チャートの読み方")
                             .font(.subheadline.bold())
                         Text("""
+                        ・軸は Watch の画面基準です。リューズが左右どちらの装着でも軸の向きは変わりません。
                         ・加速度: 各軸方向への並進運動 (g)。重力は除去済みです。
                         ・角速度: 各軸まわりの回転 (°/s)。軸の正方向に右ねじが進む回転が正です。
-                        ・軸は Watch 本体（画面）基準のため、腕の向きが変わると世界座標に対する向きも変わります。
+                        ・腕の向きが変わると、世界座標（コート基準）に対する軸の向きは変わります。
                         """)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -243,116 +262,131 @@ struct AxisGuideView: View {
     }
 }
 
-// MARK: - WatchAxisDiagram
+// MARK: - Watch3DAxisView
 
-/// Apple Watch 本体と軸矢印のベクター図
-private struct WatchAxisDiagram: View {
+/// Apple Watch 本体と座標軸の 3D モデル（RealityKit）
+///
+/// ドラッグで自由に回転でき、どの装着向きでも軸の対応を立体的に確認できる。
+/// ライティングに依存しない UnlitMaterial を使用（配色は AxisPalette と同一）。
+private struct Watch3DAxisView: View {
+
+    let crownOnLeft: Bool
 
     var body: some View {
-        Canvas { context, size in
-            let cx = size.width * 0.5
-            let cy = size.height * 0.5
-            let bodyW: CGFloat = 110
-            let bodyH: CGFloat = 130
-            let stroke = Color.secondary
-
-            // バンド（上下）
-            let bandW: CGFloat = 64
-            let bandRect1 = CGRect(x: cx - bandW / 2, y: cy - bodyH / 2 - 52, width: bandW, height: 48)
-            let bandRect2 = CGRect(x: cx - bandW / 2, y: cy + bodyH / 2 + 4, width: bandW, height: 48)
-            for rect in [bandRect1, bandRect2] {
-                context.stroke(
-                    Path(roundedRect: rect, cornerRadius: 10),
-                    with: .color(stroke.opacity(0.6)),
-                    lineWidth: 1.5
-                )
-            }
-
-            // 本体
-            let bodyRect = CGRect(x: cx - bodyW / 2, y: cy - bodyH / 2, width: bodyW, height: bodyH)
-            context.stroke(
-                Path(roundedRect: bodyRect, cornerRadius: 26),
-                with: .color(stroke),
-                lineWidth: 2.5
-            )
-
-            // リューズ（右側）
-            let crownRect = CGRect(x: bodyRect.maxX + 2, y: cy - 26, width: 6, height: 22)
-            context.fill(Path(roundedRect: crownRect, cornerRadius: 3), with: .color(stroke.opacity(0.7)))
-            let buttonRect = CGRect(x: bodyRect.maxX + 2, y: cy + 4, width: 5, height: 26)
-            context.fill(Path(roundedRect: buttonRect, cornerRadius: 2.5), with: .color(stroke.opacity(0.4)))
-
-            // X 軸矢印（右方向）
-            drawArrow(
-                context: &context,
-                from: CGPoint(x: cx, y: cy),
-                to: CGPoint(x: cx + 92, y: cy),
-                color: AxisPalette.x
-            )
-            context.draw(
-                Text("+X").font(.footnote.bold()).foregroundStyle(AxisPalette.x),
-                at: CGPoint(x: cx + 100, y: cy - 14)
-            )
-
-            // Y 軸矢印（上方向）
-            drawArrow(
-                context: &context,
-                from: CGPoint(x: cx, y: cy),
-                to: CGPoint(x: cx, y: cy - 108),
-                color: AxisPalette.y
-            )
-            context.draw(
-                Text("+Y").font(.footnote.bold()).foregroundStyle(AxisPalette.y),
-                at: CGPoint(x: cx + 16, y: cy - 104)
-            )
-
-            // Z 軸（画面から手前 = ⊙ 記法: 円 + 中心点）
-            let zRadius: CGFloat = 13
-            context.stroke(
-                Path(ellipseIn: CGRect(x: cx - zRadius, y: cy - zRadius, width: zRadius * 2, height: zRadius * 2)),
-                with: .color(AxisPalette.z),
-                lineWidth: 2.5
-            )
-            context.fill(
-                Path(ellipseIn: CGRect(x: cx - 3, y: cy - 3, width: 6, height: 6)),
-                with: .color(AxisPalette.z)
-            )
-            context.draw(
-                Text("+Z (手前)").font(.footnote.bold()).foregroundStyle(AxisPalette.z),
-                at: CGPoint(x: cx - 4, y: cy + 30)
-            )
+        RealityView { content in
+            content.add(Self.makeRoot(crownOnLeft: crownOnLeft))
+        } update: { content in
+            // 装着スタイル切替時にモデルを再構築
+            content.entities.removeAll()
+            content.add(Self.makeRoot(crownOnLeft: crownOnLeft))
         }
-        .accessibilityLabel("Apple Watch の座標軸: X は画面右方向、Y は画面上方向、Z は画面から手前方向")
+        .realityViewCameraControls(.orbit)
+        .accessibilityLabel("Apple Watch の3Dモデル: X は画面右方向、Y は画面上方向、Z は画面から手前方向")
     }
 
-    /// 矢印（軸線 + 三角の矢じり）を描画する
-    private func drawArrow(
-        context: inout GraphicsContext,
-        from: CGPoint,
-        to: CGPoint,
-        color: Color
-    ) {
-        var line = Path()
-        line.move(to: from)
-        line.addLine(to: to)
-        context.stroke(line, with: .color(color), lineWidth: 2.5)
+    // MARK: - Scene Construction
 
-        // 矢じり
-        let angle = atan2(to.y - from.y, to.x - from.x)
-        let headLength: CGFloat = 12
-        let headAngle: CGFloat = .pi / 7
-        var head = Path()
-        head.move(to: to)
-        head.addLine(to: CGPoint(
-            x: to.x - headLength * cos(angle - headAngle),
-            y: to.y - headLength * sin(angle - headAngle)
-        ))
-        head.addLine(to: CGPoint(
-            x: to.x - headLength * cos(angle + headAngle),
-            y: to.y - headLength * sin(angle + headAngle)
-        ))
-        head.closeSubpath()
-        context.fill(head, with: .color(color))
+    private static func makeRoot(crownOnLeft: Bool) -> Entity {
+        let root = Entity()
+
+        let bodyMaterial = UnlitMaterial(color: UIColor(white: 0.55, alpha: 1.0))
+        let screenMaterial = UnlitMaterial(color: UIColor(white: 0.12, alpha: 1.0))
+        let bandMaterial = UnlitMaterial(color: UIColor(white: 0.35, alpha: 1.0))
+
+        // 本体
+        let body = ModelEntity(
+            mesh: .generateBox(width: 1.1, height: 1.3, depth: 0.3, cornerRadius: 0.12),
+            materials: [bodyMaterial]
+        )
+        root.addChild(body)
+
+        // 画面（本体前面 = +Z 側）
+        let screen = ModelEntity(
+            mesh: .generateBox(width: 0.92, height: 1.08, depth: 0.04, cornerRadius: 0.08),
+            materials: [screenMaterial]
+        )
+        screen.position = [0, 0, 0.15]
+        root.addChild(screen)
+
+        // バンド（上下）
+        for yPos in [Float(1.0), Float(-1.0)] {
+            let band = ModelEntity(
+                mesh: .generateBox(width: 0.6, height: 0.75, depth: 0.24, cornerRadius: 0.1),
+                materials: [bandMaterial]
+            )
+            band.position = [0, yPos, 0]
+            root.addChild(band)
+        }
+
+        // リューズ（装着スタイルに応じて左右）
+        let crown = ModelEntity(
+            mesh: .generateCylinder(height: 0.14, radius: 0.09),
+            materials: [bandMaterial]
+        )
+        crown.orientation = simd_quatf(angle: .pi / 2, axis: [0, 0, 1])  // Y軸円柱 → X方向へ
+        crown.position = [crownOnLeft ? -0.62 : 0.62, 0.2, 0]
+        root.addChild(crown)
+
+        // 座標軸（画面基準・リューズ位置に依らず固定）
+        root.addChild(axisArrow(direction: [1, 0, 0], colorHex: (0x42, 0x69, 0xD0), label: "+X"))
+        root.addChild(axisArrow(direction: [0, 1, 0], colorHex: (0xB4, 0x53, 0x09), label: "+Y"))
+        root.addChild(axisArrow(direction: [0, 0, 1], colorHex: (0x3C, 0xA9, 0x51), label: "+Z"))
+
+        return root
+    }
+
+    /// 原点から direction 方向への矢印（軸線 + 円錐の矢じり + ラベル）
+    private static func axisArrow(
+        direction: SIMD3<Float>,
+        colorHex: (Int, Int, Int),
+        label: String
+    ) -> Entity {
+        let color = UIColor(
+            red: CGFloat(colorHex.0) / 255.0,
+            green: CGFloat(colorHex.1) / 255.0,
+            blue: CGFloat(colorHex.2) / 255.0,
+            alpha: 1.0
+        )
+        let material = UnlitMaterial(color: color)
+        let arrow = Entity()
+
+        // 円柱・円錐はデフォルトで +Y 方向 → direction へ回転
+        let rotation = simd_quatf(from: [0, 1, 0], to: direction)
+
+        let shaftLength: Float = 1.5
+        let shaft = ModelEntity(
+            mesh: .generateCylinder(height: shaftLength, radius: 0.03),
+            materials: [material]
+        )
+        shaft.orientation = rotation
+        shaft.position = direction * (shaftLength / 2)
+        arrow.addChild(shaft)
+
+        let head = ModelEntity(
+            mesh: .generateCone(height: 0.22, radius: 0.09),
+            materials: [material]
+        )
+        head.orientation = rotation
+        head.position = direction * (shaftLength + 0.11)
+        arrow.addChild(head)
+
+        // ラベル（常にカメラを向く）
+        let textMesh = MeshResource.generateText(
+            label,
+            extrusionDepth: 0.02,
+            font: .boldSystemFont(ofSize: 0.24),
+            containerFrame: .zero,
+            alignment: .center,
+            lineBreakMode: .byClipping
+        )
+        let text = ModelEntity(mesh: textMesh, materials: [material])
+        let bounds = textMesh.bounds
+        text.position = direction * (shaftLength + 0.4)
+            - [bounds.extents.x / 2, bounds.extents.y / 2, 0]
+        text.components.set(BillboardComponent())
+        arrow.addChild(text)
+
+        return arrow
     }
 }
 
