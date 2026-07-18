@@ -1,80 +1,90 @@
 # F-I6 動画同期 実装計画（Phase 5 を前倒し）
 
-**状態: 完了（2026-07-18）** — 実機検証（下記チェックリスト）はユーザー側で今後の練習時に実施
+**状態: 改訂中**（2026-07-18 v2）— 実機フィードバックを受けてアーキテクチャを刷新
 
-> **このドキュメントの目的**: セッション中断後も本ファイルと `git log`・`Logs/` を読めば再開できる状態を保つ。
-> 運用ルールは `docs/plans/PHASE2_PLAN.md` と同じ（タスク完了ごとにビルド green でコミット）。
+## 改訂の経緯
 
-## Context（なぜ Phase 5 を前倒しするか）
+初版（v1）は「セッション中連続録画 + 詳細画面で壁時計時刻マッチング」だった。
+実機確認後、ユーザーから以下の要望が出た。
 
-Phase 3 Wave 1（アノテーション基盤）は完成したが、**実データを集め始めると
-「どのスイング記録が実際のどのショットか分からない」**という問題が起きる。
-CSV波形だけでは見分けがつかないため、アノテーション（F-I3）の精度が落ちる。
+- I-1: 動画は音声なしに（→ 確認したところ既にマイク入力を追加しておらず対応済み）
+- I-2: 録画ボタンの手動操作をなくしたい／動画とセンサー値をシンクしたい／
+  **データはスイング単位で持ちたい**
+- I-3: シークバーで細かく再生位置を指定したい
+- I-4: 動画の再生位置と波形グラフの横軸を同期したい
 
-解決策として、要求2.2・F-I6（スロー動画と波形の同期表示、本来は Phase 5）を前倒しする。
-動画があれば「このスイングはフォアハンドだった」と確実にラベル付けでき、
-Wave 2（Core ML 学習）の学習データ品質が上がる。目的は Phase 3 Wave 1 の成果を実用化すること。
+I-2 の「スイング単位で持ちたい」が本質的な設計変更を要求している。
+CSV が `F-W4: 1スイング=1ファイル` なのと対称的に、**動画も1スイング=1クリップ**にする。
 
-## スコープの絞り込み（意思決定）
+## 新アーキテクチャ
 
-- **撮影**: iPhone を三脚固定し、練習セッション中**連続で動画を録画**する
-  （1スイングごとに撮り直すのではなく、Watch のセッションと同様に開始〜終了で1本）
-- **同期方式**: 動画開始時刻（壁時計 `Date`）とスイングの `detectedAt`（壁時計）の差分で
-  動画内の再生位置を計算する。Watch と iPhone は別デバイスのため数百ms程度のズレは起こりうるが、
-  目視でショットを識別する用途では十分（フレーム単位の精度は不要）
-- **「スロー」の実現方法**: 高フレームレート撮影（960/240fps 等）は機種依存が大きく、
-  実機無しでの検証リスクが高いため見送る。**通常撮影 + AVPlayer の再生速度を落とす**
-  （0.25x/0.5x トグル）方式を採用する。将来的に高fps撮影に変更しても同期ロジックは流用できる
-- **音声**: 記録しない（フォーム分析に不要、プライバシー・容量の観点でも不要）
-- **UI構成**: タブを追加し「スイング」（既存）と「録画」（新規、カメラプレビュー+開始/停止）を切り替える。
-  詳細画面は要求通り「上部に動画・下部に波形」を1画面に統合する
+### トリガー（I-2: 手動ボタン廃止）
 
-## タスク分解
+- Watch: `RecordSessionUseCase.startSession()/stopSession()` のタイミングで
+  `WCSession.updateApplicationContext` により iPhone へセッション開始/終了 + sessionId を通知
+- iPhone: `PhoneSessionManager` が受信し `PracticeVideoRecorder` の録画を自動開始/停止
+- iPhone 側の「録画」タブはカメラプレビュー+状態表示のみ（開始/停止ボタンは廃止）
 
-- [x] **T1: Domain — PracticeVideo エンティティ + VideoStore** ✅ 2026-07-18
-  - `PracticeVideo`（Codable, startedAt/endedAt/fileName）+ `VideoStore`
-    （Documents/videos/{uuid}.mov + {uuid}.json サイドカー）
-  - ユニットテスト5件（contains/offsetSeconds の境界値含む）、全PASS
+### データモデル（I-2: スイング単位）
 
-- [x] **T2: Infrastructure — カメラ録画（AVFoundation）** ✅ 2026-07-18
-  - `PracticeVideoRecorder`: `AVCaptureSession`（背面カメラ・音声無し）+
-    `AVCaptureMovieFileOutput`、権限要求（`CameraPermissionState`）
-  - `didStartRecordingTo` で実録画開始時刻を記録（ボタン押下との起動ラグを除くため）
-  - `willResignActiveNotification` で自動停止（バックグラウンド遷移時のファイル破損防止）
-  - 実機カメラ動作は T3（UI結線）後に確認
+- **継続録画（内部の中間データ）**: `Documents/video_sources/{sessionId}.mov` + `.json`
+  （Watch の sessionId をそのまま使う。壁時計時刻マッチングが不要になる）
+- **スイング単位クリップ（最終データ、ユーザーに見せる）**: `Documents/videos/{sessionId}/{sequence}.mov`
+  （CSV の `Documents/swings/{sessionId}/{sequence}.csv` と対称なレイアウト）
+- スイングの CSV が iPhone に届くたびに、対応する継続録画から
+  **`AVAssetExportSession` でインパクト前後2秒を切り出して**クリップを自動生成する
+- 継続録画（中間データ）はセッション終了通知から一定時間（未転送分の到着を待つ猶予）後に削除
 
-- [x] **T3: Presentation — 録画タブ** ✅ 2026-07-18
-  - `RecordingCameraView`: `CameraPreviewView`（AVCaptureVideoPreviewLayer の
-    UIViewRepresentable）+ 録画ボタン + 経過時間バッジ + 権限拒否時の設定誘導
-  - `TennisAnalyserApp`: `TabView`（スイング/録画）に変更。`PracticeVideoRecorder` は
-    App 側で1つだけ生成し `videoStore` と同一インスタンスを共有（環境注入）
-  - 設計修正: `RecordingCameraView.init()` 内で仮の `VideoStore` を生成する初期実装は、
-    environmentObject の `videoStore` と別インスタンスになり保存した動画が一覧に
-    反映されないバグだったため、App 側で一元生成する方式に直した
+### 同期方式が大幅に単純化
 
-- [x] **T4: Presentation — 詳細画面への動画統合（F-I6 本体）** ✅ 2026-07-18
-  - `VideoSyncPlayerView`: `AVPlayer` をインパクト前後±2秒でシーク・その区間をループ再生。
-    再生/一時停止、速度切り替え（0.25x/0.5x/1.0x）
-  - `SwingDetailView`: `matchedVideo(for:)` で `record.detectedAt` を含む動画を検索し、
-    見つかれば動画をヘッダー直下・波形の上に表示（要求通り「上部に動画・下部に波形」）
-  - 見つからない場合は「対応する動画がありません」の軽い表示（エラーにしない）
-  - Why not 正確なウィンドウ幅: pre/post 秒数は Watch 側で調整可能だが、動画同期は目視確認用途の
-    ため既定値（前後2秒）の近似で十分と判断（コード内コメント参照）
+クリップの長さ＝スイングウィンドウ（前後2秒）と一致するため、
+**クリップ内の再生位置がそのままインパクトからの相対時間**になる
+（`relativeTimeSec = playerTime - preRollSeconds`）。壁時計マッチングは
+「どの継続録画から切り出すか」の1回だけで済む。
 
-- [x] **T5: ドキュメント更新** ✅ 2026-07-18
-  - REQUIREMENTS.md: F-I6 の TBD（同期方式）を解消、Phase 5 マイルストーンに完了マーク
-  - Logs 追記
+### I-3/I-4（シークバー・グラフ同期）
+
+- `VideoSyncPlayerView` にシークバー（`Slider`）を追加。クリップ全体（短い）を対象に
+  細かく再生位置を指定できる
+- 再生位置を `relativeTimeSec`（インパクトからの相対秒）としてバインディング経由で
+  `SwingDetailView` へ通知し、波形グラフに再生位置を示す `RuleMark`（縦線）を重ねる
+
+## タスク分解（v2）
+
+- [x] **T6: Watch — セッション開始/終了通知** ✅ 2026-07-18
+  - `SwingTransferRepository` に `notifySessionStarted(sessionId:)`/`notifySessionEnded(sessionId:)` を追加
+  - `WCSessionTransferRepository`: `updateApplicationContext` で通知
+  - `WorkoutViewModel`: start/stop 時に呼び出す（stop時はセッション終了前にIDを退避）
+
+- [ ] **T7: iOS — 録画の自動トリガー化**
+  - `PhoneSessionManager` に `didReceiveApplicationContext` を実装し `PracticeVideoRecorder` を制御
+  - `PracticeVideoRecorder.startRecording(sessionId:)` に変更（sessionId をそのまま動画IDに使う）
+  - `RecordingCameraView`: 手動ボタンを削除、状態表示（自動録画中/待機中）のみに
+
+- [ ] **T8: iOS — スイング単位クリップ自動生成**
+  - `VideoStore`: 継続録画（video_sources）とクリップ（videos/{sessionId}/{sequence}.mov）を分離
+  - `extractClipIfNeeded(sessionId:sequence:detectedAt:)`: `AVAssetExportSession` で前後2秒を切り出し
+  - `PhoneSessionManager.didReceive file:` でスイング受信のたびにクリップ生成をキック
+  - セッション終了通知から猶予後に継続録画を削除
+
+- [ ] **T9: iOS — VideoSyncPlayerView 刷新（I-3/I-4）**
+  - クリップ直再生（壁時計シーク不要、0秒始まり・クリップ全体をループ）
+  - シークバー（Slider）追加
+  - 再生位置を `relativeTimeSec` としてバインディングで公開
+  - `SwingDetailView`: 波形グラフに再生位置の `RuleMark` を重ねる
+
+- [ ] **T10: ドキュメント更新**
 
 ## 再開手順
 
 1. 本ファイルのチェックボックスを確認 → `git log --oneline -10`
-2. ビルド確認:
-   `xcodebuild -project TennisAnalyser.xcodeproj -scheme "TennisAnalyser" -destination 'generic/platform=iOS' build`
+2. ビルド確認（iOS/Watch 両方）
 3. 未完了の最初のタスクから着手
 
-## 実機検証項目（T1〜T5 完了後）
+## 実機検証項目（T6〜T10 完了後）
 
-- カメラ権限ダイアログが出て許可できる
-- 録画開始→数分後に停止→ファイルが保存される
-- 同じセッション中に記録されたスイングの詳細画面で、動画が該当タイミング付近にシークされて表示される
-- スロー再生トグルが機能する
+- Watch で計測開始 → iPhone のカメラが自動で録画開始（ボタン操作なし）
+- スイング → 該当スイングの詳細画面で数秒後にはクリップが生成され再生できる
+- シークバーで細かく操作できる
+- 再生位置に応じて波形グラフに縦線が動く
+- Watch で計測停止 → iPhone の録画も自動停止、継続録画は猶予後に削除される

@@ -78,7 +78,32 @@ final class WCSessionTransferRepository: NSObject, SwingTransferRepository {
         notifyStatus()
     }
 
+    /// F-I6: セッション開始を iPhone へ通知する（applicationContext は「最新状態のみ」を
+    /// 保持し、iPhone がバックグラウンドでも到達するため、この用途に適している）
+    func notifySessionStarted(sessionId: String) {
+        sendSessionStatus(sessionId: sessionId, status: "started")
+    }
+
+    func notifySessionEnded(sessionId: String) {
+        sendSessionStatus(sessionId: sessionId, status: "ended")
+    }
+
     // MARK: - Private
+
+    private func sendSessionStatus(sessionId: String, status: String) {
+        guard session.activationState == .activated else { return }
+        do {
+            try session.updateApplicationContext([
+                "type": "sessionStatus",
+                "sessionId": sessionId,
+                "status": status,
+                "timestamp": ISO8601DateFormatter().string(from: Date()),
+            ])
+            print("[Transfer] session \(status): \(sessionId)")
+        } catch {
+            print("[Transfer] updateApplicationContext error: \(error)")
+        }
+    }
 
     /// 転送状態を通知する
     /// - Parameter finished: 完了直後の転送。`didFinish` 時点では

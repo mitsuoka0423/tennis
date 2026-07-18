@@ -112,6 +112,10 @@ final class WorkoutViewModel: ObservableObject {
                     self.isRecording = true
                     self.startDate = Date()
                     self.startTimer()
+                    // F-I6: iPhone のカメラ自動録画を開始させる
+                    if let sessionId = self.recordSessionUseCase.currentSessionId {
+                        self.transferRepo.notifySessionStarted(sessionId: sessionId)
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -125,6 +129,7 @@ final class WorkoutViewModel: ObservableObject {
     /// セッション停止（HealthKit終了 + CSV保存）
     func stop() {
         guard isRecording else { return }
+        let sessionId = recordSessionUseCase.currentSessionId
 
         Task.detached { [weak self] in
             guard let self else { return }
@@ -142,6 +147,10 @@ final class WorkoutViewModel: ObservableObject {
                 self.updateStats()
                 // ワークアウト終了時に未転送分を再送（F-W5）
                 self.transferRepo.retryPending()
+                // F-I6: iPhone のカメラ自動録画を停止させる
+                if let sessionId {
+                    self.transferRepo.notifySessionEnded(sessionId: sessionId)
+                }
             }
         }
     }

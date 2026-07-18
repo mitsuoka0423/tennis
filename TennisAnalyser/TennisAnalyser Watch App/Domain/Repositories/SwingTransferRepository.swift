@@ -23,4 +23,10 @@ protocol SwingTransferRepository: AnyObject {
 
     /// 未転送分を再送する（ワークアウト終了時・アクティベート完了時）
     func retryPending()
+
+    /// セッション開始を iPhone へ通知する（F-I6: 自動録画のトリガー）
+    func notifySessionStarted(sessionId: String)
+
+    /// セッション終了を iPhone へ通知する（F-I6: 自動録画停止のトリガー）
+    func notifySessionEnded(sessionId: String)
 }
