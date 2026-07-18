@@ -11,9 +11,12 @@
 
 ## 現在地
 
-**P3-T1〜T5 完了**（2026-07-19）。次: P3-T6（ドキュメント更新・クローズ）
+**Phase 3 Wave 1 完了**（2026-07-18）🎉
 - T2（アノテーションUI）と T3（フィルタ）は `ContentView.swift` を同時に触るため1コミットにまとめた
 - T4（解析エンジン）は `SwingDetailView` のヘッダー実装（T2）と合わせて実装したため先に完了
+
+**次のアクション**: 実際のテニス練習でデータを収集し、iPhone でアノテーションする運用フェーズへ。
+各クラス50本（最初の学習実験ライン）に達したら Wave 2（Create ML 学習・統合）に着手する。
 
 ## 前提となる意思決定（TBD の解消）
 
@@ -73,29 +76,29 @@ Watch 側 `MotionSample.ShotClass` は現状 `FOREHAND/BACKHAND/SERVE/OTHER` の
 
 ## タスク分解（Wave 1）
 
-- [x] **P3-T1: ShotClass の6分類化 + CSV 往復** ✅ 2026-07-19
+- [x] **P3-T1: ShotClass の6分類化 + CSV 往復** ✅ 2026-07-18
   - Watch/iOS 双方に6分類 ShotClass（rawValue 一致）
   - `writeShotClass`: メタ行（`# ShotClass:`）とデータ行末尾を書き換え、順序（メタ→ヘッダー→データ）を保持
   - ユニットテスト: Watch 2件 + iOS 3件、全PASS
 
-- [x] **P3-T2: iOS — アノテーション UI（F-I3）** ✅ 2026-07-19
+- [x] **P3-T2: iOS — アノテーション UI（F-I3）** ✅ 2026-07-18
   - `SwingDetailView`: `record` を `SwingStore` 経由の算出プロパティに変更（`recordId` 保持）し、
     タグ付け直後に表示へ即反映されるようにした。ショット種別メニュー（Capsule ボタン）を追加
   - `ContentView`: `List(selection:)` + `EditMode` で複数選択モードを実装、
     選択中はツールバーに「一括タグ付け」メニュー
   - `SwingRow` にラベルチップを追加（未設定時は非表示）
 
-- [x] **P3-T3: iOS — 一覧のフィルタリング（F-I2 将来項目の実装）** ✅ 2026-07-19
+- [x] **P3-T3: iOS — 一覧のフィルタリング（F-I2 将来項目の実装）** ✅ 2026-07-18
   - ツールバー左に絞り込みメニュー（すべて/未タグ/クラス別インライン Picker）
   - 該当0件時は `ContentUnavailableView` で明示
 
-- [x] **P3-T4: iOS — 解析エンジンの基礎（F-I4）** ✅ 2026-07-19
+- [x] **P3-T4: iOS — 解析エンジンの基礎（F-I4）** ✅ 2026-07-18
   - `Domain/SwingAnalysis.swift`: `SwingAnalyzer.analyze` 純粋関数
     （ピーク時刻・ピーク値・減速開始点=ピークの50%まで低下した最初の時刻）
   - `SwingDetailView` に「簡易指標 (β)」として表示。本格スコアリングは未実装であることを明示
   - ユニットテスト5件、全PASS
 
-- [x] **P3-T5: iOS — 学習データのエクスポート** ✅ 2026-07-19
+- [x] **P3-T5: iOS — 学習データのエクスポート** ✅ 2026-07-18
   - `Infrastructure/TrainingDataExporter.swift`: ラベル付きスイングを
     `<ShotClass>/<sessionId>_<sequence>.csv` に整理 + `manifest.csv`（swingId, sessionId,
     sequence, shotClass, detectedAt, peakAcceleration）を出力
@@ -107,9 +110,9 @@ Watch 側 `MotionSample.ShotClass` は現状 `FOREHAND/BACKHAND/SERVE/OTHER` の
   - ユニットテスト2件（未ラベル時のエラー、クラス別整理+manifest内容）、全PASS
   - Create ML への具体的な取り込み方法（スキーマ調査）は Wave 2 で設計
 
-- [ ] **P3-T6: ドキュメント更新**
-  - REQUIREMENTS.md の F-W7 TBD 部分を本計画の内容で更新
-  - Logs に記録、本ファイルの完了マーク
+- [x] **P3-T6: ドキュメント更新** ✅ 2026-07-18
+  - REQUIREMENTS.md の F-W7 TBD 部分を本計画の内容で更新、Phase 3 ロードマップに Wave 1/2 の区切りを明記
+  - Logs に記録
 
 ## Wave 2（着手条件: 各クラス50本以上のラベル付きデータ）
 
