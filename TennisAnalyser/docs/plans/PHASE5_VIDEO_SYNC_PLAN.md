@@ -29,17 +29,17 @@ Wave 2（Core ML 学習）の学習データ品質が上がる。目的は Phase
 
 ## タスク分解
 
-- [ ] **T1: Domain — PracticeVideo エンティティ + VideoStore**
-  - `Domain/PracticeVideo.swift`: id, fileURL, startedAt, endedAt?
-  - `Infrastructure/VideoStore.swift`: 保存先 `Documents/videos/{uuid}.mov` + サイドカー
-    `{uuid}.json`（startedAt/endedAt）。一覧・保存・「指定時刻を含む動画を検索」を提供
-  - DoD: ビルド green、ユニットテスト（時刻マッチングロジック）
+- [x] **T1: Domain — PracticeVideo エンティティ + VideoStore** ✅ 2026-07-18
+  - `PracticeVideo`（Codable, startedAt/endedAt/fileName）+ `VideoStore`
+    （Documents/videos/{uuid}.mov + {uuid}.json サイドカー）
+  - ユニットテスト5件（contains/offsetSeconds の境界値含む）、全PASS
 
-- [ ] **T2: Infrastructure — カメラ録画（AVFoundation）**
-  - `Infrastructure/PracticeVideoRecorder.swift`: `AVCaptureSession` + `AVCaptureMovieFileOutput`
-    のラッパー（ObservableObject: isRecording, start()/stop()）
-  - 音声トラックなし（ビデオのみ）、バックグラウンド遷移時は自動停止（データ破損防止）
-  - DoD: ビルド green（実機でのみ実カメラ動作確認可能）
+- [x] **T2: Infrastructure — カメラ録画（AVFoundation）** ✅ 2026-07-18
+  - `PracticeVideoRecorder`: `AVCaptureSession`（背面カメラ・音声無し）+
+    `AVCaptureMovieFileOutput`、権限要求（`CameraPermissionState`）
+  - `didStartRecordingTo` で実録画開始時刻を記録（ボタン押下との起動ラグを除くため）
+  - `willResignActiveNotification` で自動停止（バックグラウンド遷移時のファイル破損防止）
+  - 実機カメラ動作は T3（UI結線）後に確認
 
 - [ ] **T3: Presentation — 録画タブ**
   - `RecordingCameraView.swift`: カメラプレビュー（`AVCaptureVideoPreviewLayer` の

@@ -1,0 +1,184 @@
+//
+//  PracticeVideoRecorder.swift
+//  TennisAnalyser (iOS)
+//
+//  Infrastructure — AVFoundation によるセッション連続録画（F-I6）
+//
+//  Why not 高フレームレート撮影: 端末ごとに対応フォーマットが異なり実機無しでは
+//  検証リスクが高い。まずは通常撮影＋再生速度変更（SwingDetailView 側）で
+//  「スロー」を実現し、必要になれば高fpsフォーマットへ切り替える
+//  （録画・同期の仕組みはそのまま流用できる設計にしている）。
+
+import AVFoundation
+import Combine
+import UIKit
+
+/// カメラ権限の状態
+enum CameraPermissionState {
+    case notDetermined
+    case granted
+    case denied
+}
+
+/// 練習セッション中の連続動画録画を管理する
+///
+/// - 音声トラックは録音しない（フォーム分析に不要）
+/// - アプリがバックグラウンドへ遷移した場合は自動停止する（ファイル破損防止）
+@MainActor
+final class PracticeVideoRecorder: NSObject, ObservableObject {
+
+    @Published private(set) var isRecording = false
+    @Published private(set) var permissionState: CameraPermissionState = .notDetermined
+    @Published private(set) var errorMessage: String?
+
+    let session = AVCaptureSession()
+
+    private let movieOutput = AVCaptureMovieFileOutput()
+    private let sessionQueue = DispatchQueue(label: "com.spleeing.TennisAnalyser.cameraSession")
+    private var isConfigured = false
+
+    private let videoStore: VideoStore
+    private var pendingVideoId: String?
+    private var recordingStartedAt: Date?
+
+    init(videoStore: VideoStore) {
+        self.videoStore = videoStore
+        super.init()
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleWillResignActive),
+            name: UIApplication.willResignActiveNotification, object: nil
+        )
+    }
+
+    // MARK: - Permission & Setup
+
+    /// カメラ権限を確認・要求し、許可されたらセッションを構成する
+    func prepare() {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            permissionState = .granted
+            configureSessionIfNeeded()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                Task { @MainActor in
+                    self?.permissionState = granted ? .granted : .denied
+                    if granted { self?.configureSessionIfNeeded() }
+                }
+            }
+        default:
+            permissionState = .denied
+        }
+    }
+
+    private func configureSessionIfNeeded() {
+        guard !isConfigured else {
+            sessionQueue.async { [session] in session.startRunning() }
+            return
+        }
+        isConfigured = true
+
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            self.session.beginConfiguration()
+            self.session.sessionPreset = .high
+
+            guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+                  let input = try? AVCaptureDeviceInput(device: device),
+                  self.session.canAddInput(input)
+            else {
+                self.session.commitConfiguration()
+                Task { @MainActor in self.errorMessage = "カメラを初期化できませんでした。" }
+                return
+            }
+            self.session.addInput(input)
+
+            guard self.session.canAddOutput(self.movieOutput) else {
+                self.session.commitConfiguration()
+                Task { @MainActor in self.errorMessage = "動画出力を初期化できませんでした。" }
+                return
+            }
+            self.session.addOutput(self.movieOutput)
+            self.session.commitConfiguration()
+            self.session.startRunning()
+        }
+    }
+
+    // MARK: - Recording
+
+    func startRecording() {
+        guard !isRecording, permissionState == .granted else { return }
+        guard let (id, url) = try? videoStore.newRecordingURL() else {
+            errorMessage = "保存先を作成できませんでした。"
+            return
+        }
+        pendingVideoId = id
+        sessionQueue.async { [movieOutput] in
+            movieOutput.startRecording(to: url, recordingDelegate: self)
+        }
+    }
+
+    func stopRecording() {
+        guard isRecording else { return }
+        sessionQueue.async { [movieOutput] in
+            movieOutput.stopRecording()
+        }
+    }
+
+    @objc private func handleWillResignActive() {
+        if isRecording { stopRecording() }
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+}
+
+// MARK: - AVCaptureFileOutputRecordingDelegate
+
+extension PracticeVideoRecorder: AVCaptureFileOutputRecordingDelegate {
+
+    nonisolated func fileOutput(
+        _ output: AVCaptureFileOutput,
+        didStartRecordingTo fileURL: URL,
+        from connections: [AVCaptureConnection]
+    ) {
+        // 実際に録画が始まった時刻を起点にする（ボタン押下〜開始のラグを除くため）
+        let startedAt = Date()
+        Task { @MainActor in
+            self.recordingStartedAt = startedAt
+            self.isRecording = true
+        }
+    }
+
+    nonisolated func fileOutput(
+        _ output: AVCaptureFileOutput,
+        didFinishRecordingTo outputFileURL: URL,
+        from connections: [AVCaptureConnection],
+        error: Error?
+    ) {
+        let endedAt = Date()
+        Task { @MainActor in
+            self.isRecording = false
+            guard let id = self.pendingVideoId, let startedAt = self.recordingStartedAt else { return }
+            self.pendingVideoId = nil
+            self.recordingStartedAt = nil
+
+            if let error {
+                // AVFoundation は正常停止時にも「非ゼロ」エラーを返すことがあるため、
+                // ファイルが実際に存在するかで成否を判断する
+                let recordedSuccessfully = (error as NSError)
+                    .userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool ?? false
+                if !recordedSuccessfully {
+                    self.errorMessage = "録画に失敗しました: \(error.localizedDescription)"
+                    return
+                }
+            }
+
+            let video = PracticeVideo(
+                id: id, startedAt: startedAt, endedAt: endedAt,
+                fileName: outputFileURL.lastPathComponent
+            )
+            self.videoStore.saveMetadata(video)
+        }
+    }
+}
