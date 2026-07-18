@@ -27,6 +27,8 @@ final class WorkoutViewModel: ObservableObject {
     @Published private(set) var isRecording: Bool = false
     /// ボタンタップ〜HealthKit認可・セッション開始完了までの待機中フラグ
     @Published private(set) var isStarting: Bool = false
+    /// 検知済みスイング数
+    @Published private(set) var swingCount: Int = 0
     @Published private(set) var sampleCount: Int = 0
     @Published private(set) var elapsedSeconds: Int = 0
     /// 計測中にリアルタイム更新される実測サンプリングレート (Hz)
@@ -67,7 +69,7 @@ final class WorkoutViewModel: ObservableObject {
                 : MotionSensorRepositoryImpl()
             self.recordSessionUseCase = RecordSessionUseCase(
                 motionRepo: motionRepo,
-                sessionRepo: SessionRepositoryImpl()
+                swingRepo: SwingRepositoryImpl()
             )
         }
 
@@ -139,6 +141,11 @@ final class WorkoutViewModel: ObservableObject {
         Task { @MainActor in
             for await count in recordSessionUseCase.$sampleCount.values {
                 self.sampleCount = count
+            }
+        }
+        Task { @MainActor in
+            for await count in recordSessionUseCase.$swingCount.values {
+                self.swingCount = count
             }
         }
         Task { @MainActor in

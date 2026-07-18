@@ -19,10 +19,9 @@
 
 ## 現在地
 
-**P2-T1 完了**（2026-07-18）。次: P2-T2
-- スコープ調整: `RecordSessionUseCase` 改修は T1 から T2 に移動
-  （T1 を純追加のみで完結させ、UseCase 改修は SwingRepository 導入と同時に行う方が
-  コミットが常に意味のある単位になるため）
+**P2-T2 完了**（2026-07-18）。次: P2-T3
+- DoD の「シミュレータでログ確認」は SwingRepositoryImpl のユニットテスト
+  （CSV生成・保存・削除ラウンドトリップ）で代替（再現可能性が高いため）
 
 ---
 
@@ -33,7 +32,7 @@
   - 新規: `Domain/Services/SwingDetector.swift`（純粋ロジック、フレームワーク非依存）
   - 新規: `TennisAnalyser Watch AppTests/SwingDetectorTests.swift`（8テスト、全PASS）
   - DoD: テストがシミュレータで PASS、ビルド green → 達成
-- [ ] **P2-T2: Watch — スイング単位 CSV 永続化（F-W4）+ UseCase 改修**
+- [x] **P2-T2: Watch — スイング単位 CSV 永続化（F-W4）+ UseCase 改修** ✅ 2026-07-18
   - 新規: `Domain/Repositories/SwingRepository.swift`（protocol）
   - 新規: `Infrastructure/SwingRepositoryImpl.swift`（1スイング=1CSV、メタ情報ヘッダー付き）
   - `RecordSessionUseCase` を SwingDetector 利用に改修（3g 点記録 → ウィンドウ切り出し→スイング保存）

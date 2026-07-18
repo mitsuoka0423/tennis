@@ -7,28 +7,56 @@
 import Foundation
 import Combine
 
-/// ワークアウトセッションを通じてセンサーデータを収集・保存するユースケース
+/// ワークアウトセッションを通じてスイングを検知・保存するユースケース
 ///
 /// 責務:
 /// - セッション開始/終了のライフサイクル管理
-/// - MotionSensorRepository からサンプルを受け取り、セッションに蓄積
-/// - 1次フィルタ（加速度閾値による省電力フィルタリング）
-/// - セッション終了時に SessionRepository へ保存
+/// - MotionSensorRepository のサンプルを SwingDetector に流し、スイングを切り出す（F-W3）
+/// - 確定したスイングを SwingRepository へ逐次保存する（F-W4）
+/// - 保存完了を `onSwingSaved` で通知する（F-W5 転送のフック）
 @MainActor
 final class RecordSessionUseCase: ObservableObject {
 
     // MARK: - Dependencies
 
     private let motionRepo: any MotionSensorRepository
-    private let sessionRepo: any SessionRepository
+    private let swingRepo: any SwingRepository
 
     // MARK: - State
 
-    @Published private(set) var currentSession: SwingSession?
     @Published private(set) var isRecording: Bool = false
+    /// 検知済みスイング数
+    @Published private(set) var swingCount: Int = 0
+    /// 保存済みサンプル総数（スイングウィンドウ内のサンプル）
     @Published private(set) var sampleCount: Int = 0
     /// フィルタ前の生サンプル総数。実測Hz・ロス率の計測（F-W2）に使用する
     @Published private(set) var rawSampleCount: Int = 0
+    @Published private(set) var error: Error?
+
+    /// 現在のセッションID（nil = 未開始）
+    private(set) var currentSessionId: String?
+
+    /// スイング保存完了フック（F-W5: 転送層が購読する）
+    var onSwingSaved: ((Swing, URL) -> Void)?
+
+    // MARK: - Configuration（要求 2.2: 調整可能）
+
+    /// 目標サンプリングレート (Hz)
+    ///
+    /// `CMBatchedSensorManager.deviceMotionUpdates()` の仕様上限は 200Hz。
+    /// 実機検証（2026-07-17, Series 9）にて実測 200Hz・ロス率 0.2% を確認。
+    var targetHz: Int = 200
+    /// インパクト判定の加速度閾値 (g)
+    var accelerationThreshold: Double = 3.0
+    /// スイングウィンドウ: インパクト前の秒数
+    var preSeconds: Double = 2.0
+    /// スイングウィンドウ: インパクト後の秒数
+    var postSeconds: Double = 2.0
+
+    // MARK: - Private
+
+    private var samplingTask: Task<Void, Never>?
+    private var detector: SwingDetector?
     /// 生サンプルの最初・最後のセンサータイムスタンプ (ms)。実測Hz計算に使用
     private var firstRawTimestampMs: Int64?
     private var lastRawTimestampMs: Int64?
@@ -43,41 +71,30 @@ final class RecordSessionUseCase: ObservableObject {
               last > first, rawSampleCount > 1 else { return 0.0 }
         return Double(rawSampleCount - 1) / (Double(last - first) / 1000.0)
     }
-    @Published private(set) var error: Error?
-
-    // MARK: - Configuration
-
-    /// 目標サンプリングレート (Hz)
-    ///
-    /// `CMBatchedSensorManager.deviceMotionUpdates()` の仕様上限は 200Hz。
-    /// 実機検証（2026-07-17, Series 9）にて実測 ~197Hz（ロス率 ~1.5%）を確認し、
-    /// deviceMotion 200Hz を採用（加速度・角速度が同期済み・重力除去済みのため）。
-    var targetHz: Int = 200
-    /// 1次フィルタ: 加速度ベクトル閾値 (g)。これを超えたサンプルのみ記録対象とする
-    var accelerationThreshold: Double = 3.0
-    /// 閾値フィルタを無効化（デバッグ・全量取得用）
-    var disableFilter: Bool = false
-
-    // MARK: - Private
-
-    private var samplingTask: Task<Void, Never>?
 
     // MARK: - Init
 
-    init(motionRepo: any MotionSensorRepository, sessionRepo: any SessionRepository) {
+    init(motionRepo: any MotionSensorRepository, swingRepo: any SwingRepository) {
         self.motionRepo = motionRepo
-        self.sessionRepo = sessionRepo
+        self.swingRepo = swingRepo
     }
 
     // MARK: - Public API
 
-    /// セッションを開始してセンサーサンプリングを開始する
+    /// セッションを開始してセンサーサンプリング・スイング検知を開始する
     func startSession() {
         guard !isRecording else { return }
 
-        let session = SwingSession.start()
-        currentSession = session
+        let sessionId = UUID().uuidString
+        currentSessionId = sessionId
+        detector = SwingDetector(
+            sessionId: sessionId,
+            preSeconds: preSeconds,
+            postSeconds: postSeconds,
+            threshold: accelerationThreshold
+        )
         isRecording = true
+        swingCount = 0
         sampleCount = 0
         rawSampleCount = 0
         firstRawTimestampMs = nil
@@ -90,7 +107,6 @@ final class RecordSessionUseCase: ObservableObject {
             print("[UseCase] sampling stream started")
             do {
                 for try await batch in stream {
-                    print("[UseCase] received batch: \(batch.count) samples")
                     await self.processBatch(batch)
                 }
             } catch {
@@ -103,23 +119,19 @@ final class RecordSessionUseCase: ObservableObject {
         }
     }
 
-    /// セッションを停止してCSVに保存する
-    func stopSession() async {
-        guard isRecording, var session = currentSession else { return }
+    /// セッションを停止する
+    ///
+    /// スイングは検知のたびに保存済みのため、停止時の一括保存は行わない。
+    /// 収集途中の未確定ウィンドウは破棄する（インパクト後2秒未満で停止した場合のみ）。
+    func stopSession() {
+        guard isRecording else { return }
 
         isRecording = false
         motionRepo.stopSampling()
         samplingTask?.cancel()
         samplingTask = nil
-
-        session = session.ended()
-        currentSession = session
-
-        do {
-            try await sessionRepo.save(session: session)
-        } catch {
-            self.error = error
-        }
+        detector = nil
+        currentSessionId = nil
     }
 
     // MARK: - Private
@@ -134,13 +146,28 @@ final class RecordSessionUseCase: ObservableObject {
         }
         rawSampleCount += batch.count
 
-        let filtered = disableFilter
-            ? batch
-            : batch.filter { $0.accelerationMagnitude >= accelerationThreshold }
+        // スイング検知・ウィンドウ切り出し（F-W3）
+        guard let detector else { return }
+        let swings = detector.feed(batch)
+        for swing in swings {
+            swingCount += 1
+            sampleCount += swing.samples.count
+            saveSwing(swing)
+        }
+    }
 
-        guard !filtered.isEmpty else { return }
-
-        currentSession = currentSession?.appending(samples: filtered)
-        sampleCount += filtered.count
+    /// スイングを保存し、完了時に onSwingSaved を通知する（F-W4 → F-W5）
+    private func saveSwing(_ swing: Swing) {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let url = try await self.swingRepo.save(swing: swing)
+                print("[UseCase] swing #\(swing.sequence) saved: \(url.lastPathComponent) (\(swing.samples.count) samples)")
+                self.onSwingSaved?(swing, url)
+            } catch {
+                print("[UseCase] swing save error: \(error)")
+                self.error = error
+            }
+        }
     }
 }
