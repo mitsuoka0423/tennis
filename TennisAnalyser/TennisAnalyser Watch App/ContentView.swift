@@ -127,16 +127,11 @@ private struct RecordingView: View {
 
             // スイング数 / 転送状況 / 実測Hz / ロス率（F-W6: 動作確認用の簡易表示）
             VStack(spacing: 2) {
+                // スイング数と転送状況を1行に集約（W-1: 停止ボタンの見切れ防止）
                 StatRow(
                     label: "スイング",
-                    value: "\(viewModel.swingCount)",
+                    value: swingStatValue,
                     valueColor: .green
-                )
-                StatRow(
-                    label: "転送済み",
-                    value: viewModel.pendingTransferCount > 0
-                        ? "\(viewModel.transferredCount) (残\(viewModel.pendingTransferCount))"
-                        : "\(viewModel.transferredCount)"
                 )
                 StatRow(
                     label: "実測Hz",
@@ -170,6 +165,18 @@ private struct RecordingView: View {
             .buttonStyle(.plain)
         }
         .padding()
+    }
+
+    /// スイング数と転送状況の1行表示
+    /// 例: "3"（転送前） / "3 (残1)"（転送中） / "3 / 転送済"（全件転送完了）
+    private var swingStatValue: String {
+        if viewModel.pendingTransferCount > 0 {
+            return "\(viewModel.swingCount) (残\(viewModel.pendingTransferCount))"
+        }
+        if viewModel.transferredCount > 0 {
+            return "\(viewModel.swingCount) / 転送済"
+        }
+        return "\(viewModel.swingCount)"
     }
 
     /// ロス率に応じた色: 1%未満=緑、5%未満=黄、それ以上=赤

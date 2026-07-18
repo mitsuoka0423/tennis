@@ -36,6 +36,28 @@ struct SwingRecord: Identifiable, Equatable {
     static func == (lhs: SwingRecord, rhs: SwingRecord) -> Bool { lhs.id == rhs.id }
 }
 
+// MARK: - Date Formatting
+
+/// 日付表示は yyyy-MM-dd 形式（I-2）
+extension Date {
+    private static let ymdhmFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f
+    }()
+
+    private static let ymdhmsFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return f
+    }()
+
+    /// `yyyy-MM-dd HH:mm`
+    var ymdhmString: String { Self.ymdhmFormatter.string(from: self) }
+    /// `yyyy-MM-dd HH:mm:ss`
+    var ymdhmsString: String { Self.ymdhmsFormatter.string(from: self) }
+}
+
 // MARK: - CSV Parser
 
 enum SwingCSVParser {

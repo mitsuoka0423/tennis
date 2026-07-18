@@ -13,13 +13,13 @@ struct SwingDetailView: View {
 
     @State private var samples: [SwingSamplePoint] = []
     @State private var isLoading = true
+    @State private var showsAxisGuide = false
 
-    /// X/Y/Z 軸の系列色（dataviz 検証済みパレット: ライト/ダーク両モードで CVD ΔE 9.5）
-    /// 固定順で割り当て、循環させない
+    /// X/Y/Z 軸の系列色（AxisPalette: 座標軸ガイドと同一配色・固定順で循環させない）
     private static let axisColors: KeyValuePairs<String, Color> = [
-        "X": Color(red: 0x42 / 255.0, green: 0x69 / 255.0, blue: 0xD0 / 255.0),  // #4269D0
-        "Y": Color(red: 0xB4 / 255.0, green: 0x53 / 255.0, blue: 0x09 / 255.0),  // #B45309
-        "Z": Color(red: 0x3C / 255.0, green: 0xA9 / 255.0, blue: 0x51 / 255.0),  // #3CA951
+        "X": AxisPalette.x,
+        "Y": AxisPalette.y,
+        "Z": AxisPalette.z,
     ]
 
     var body: some View {
@@ -50,6 +50,19 @@ struct SwingDetailView: View {
         }
         .navigationTitle("スイング #\(record.sequence)")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showsAxisGuide = true
+                } label: {
+                    Image(systemName: "move.3d")
+                }
+                .accessibilityLabel("座標軸ガイド")
+            }
+        }
+        .sheet(isPresented: $showsAxisGuide) {
+            AxisGuideView()
+        }
         .task {
             // 波形は詳細表示時に遅延ロード（一覧はメタ情報のみで軽量に保つ）
             let url = record.fileURL
@@ -66,7 +79,8 @@ struct SwingDetailView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let date = record.detectedAt {
-                Text(date.formatted(date: .abbreviated, time: .standard))
+                // I-2: 日付は yyyy-MM-dd 表記
+                Text(date.ymdhmsString)
                     .font(.headline)
             }
             HStack(spacing: 16) {

@@ -10,6 +10,7 @@ import SwiftUI
 struct ContentView: View {
 
     @EnvironmentObject private var store: SwingStore
+    @State private var showsAxisGuide = false
 
     var body: some View {
         NavigationStack {
@@ -22,6 +23,14 @@ struct ContentView: View {
             }
             .navigationTitle("スイング")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showsAxisGuide = true
+                    } label: {
+                        Image(systemName: "move.3d")
+                    }
+                    .accessibilityLabel("座標軸ガイド")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         store.reload()
@@ -30,6 +39,9 @@ struct ContentView: View {
                     }
                     .accessibilityLabel("再読み込み")
                 }
+            }
+            .sheet(isPresented: $showsAxisGuide) {
+                AxisGuideView()
             }
         }
     }
@@ -87,8 +99,8 @@ struct ContentView: View {
 
     private func sessionTitle(_ group: SessionGroup) -> String {
         if let date = group.records.last?.detectedAt {
-            return date.formatted(date: .abbreviated, time: .shortened)
-                + " のセッション (\(group.records.count)本)"
+            // I-2: 日付は yyyy-MM-dd 表記
+            return date.ymdhmString + " のセッション (\(group.records.count)本)"
         }
         return "セッション (\(group.records.count)本)"
     }

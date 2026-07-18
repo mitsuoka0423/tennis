@@ -80,8 +80,15 @@ final class WCSessionTransferRepository: NSObject, SwingTransferRepository {
 
     // MARK: - Private
 
-    private func notifyStatus() {
-        let pending = session.outstandingFileTransfers.count
+    /// 転送状態を通知する
+    /// - Parameter finished: 完了直後の転送。`didFinish` 時点では
+    ///   `outstandingFileTransfers` にまだ含まれていることがあるため除外する（W-2）
+    private func notifyStatus(excluding finished: WCSessionFileTransfer? = nil) {
+        var outstanding = session.outstandingFileTransfers
+        if let finished {
+            outstanding.removeAll { $0 === finished }
+        }
+        let pending = outstanding.count
         let transferred = transferredCount
         DispatchQueue.main.async { [weak self] in
             self?.onStatusChanged?(transferred, pending)
@@ -122,6 +129,6 @@ extension WCSessionTransferRepository: WCSessionDelegate {
                 print("[Transfer] cleanup error: \(error)")
             }
         }
-        notifyStatus()
+        notifyStatus(excluding: fileTransfer)
     }
 }
