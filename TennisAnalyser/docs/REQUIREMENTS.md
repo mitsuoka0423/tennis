@@ -196,9 +196,10 @@ watchOS 10以降で利用可能な高頻度モーションAPI（`CMBatchedSensor
    * `CMBatchedSensorManager` を使用し、200Hzで3軸データを取得してタイムスタンプ付きCSVへ書き出す最小構成の実装。
    * 実機検証結果: 200Hz・ロス率 0.2%（Logs/2026-07-18.log）。バッテリー消費の実測は持ち越し。
 
-2. **Phase 2: 練習モード (Practice Mode)**
+2. **Phase 2: 練習モード (Practice Mode)** — ✅ 完了（2026-07-18）
    * ターゲット: スイングウィンドウ切り出し（F-W3）、スイング単位 CSV（F-W4）、逐次転送（F-W5）、Watch 簡易表示（F-W6）、iOS 受信（F-I1）とスイング一覧・波形表示（F-I2）。
    * ゴール: 練習中、打った約10秒後に iPhone でスイング波形を確認できる。
+   * 実機 E2E 検証済み（スイング → 転送 → 一覧 → 波形表示 → 転送後キャッシュ削除）。既知の課題は docs/plans/PHASE2_PLAN.md を参照。
 
 3. **Phase 3: Core ML Integration (分類)**
    * ターゲット: アノテーション機能（F-I3）で学習データを作成し、Create ML によるショット分類モデル（F-W7）を搭載。解析エンジン（F-I4）の基礎実装。

@@ -148,3 +148,56 @@ Phase 2 着手前に「CSV 転送で良いのか」という疑問をきっか�
 - ユニットテスト: SwingDetector 8件 + SwingRepositoryImpl 2件、全PASS
 - 波形チャートの3軸色は dataviz バリデータ検証済み（両モードPASS, CVD ΔE 9.5）
 - 残: **P2-T7 実機 E2E 検証**（Watch スイング → 10秒以内に iPhone 一覧 → 波形表示）
+
+---
+
+## 追記: P2-T7 実機 E2E 検証 → Phase 2 完了 🎉
+
+### E2E 結果
+
+スイング → 逐次転送 → iPhone 一覧反映 → 波形表示 → 転送後キャッシュ削除、**すべて動作確認**。
+Console ログでも `swing #N saved (799 samples) → enqueued → finished` の連続動作を確認。
+
+### フィードバック対応（4ラウンド）
+
+| # | 内容 | 結果 |
+|---|---|---|
+| W-1 | 停止ボタン見切れ → 表示圧縮（2段階） | ✅ |
+| W-2 | 転送完了後も残1表示 → didFinish の残数計算修正 | ✅ |
+| W-3 | スイング行表記を転送前後で統一（常に「n (残m)」） | ✅ |
+| W-4 | 開始/停止ボタンを ActionButton 共通化（大きさ・位置統一） | ✅ |
+| I-1 | 座標軸ガイド新設 → 3D化（RealityKit、Digital Crown 左右切替） | ⚠️ 初期表示サイズ大のまま（下記） |
+| I-2 | 日付を yyyy-MM-dd 表記に | ✅ |
+| I-3 | 呼称を正式名称 Digital Crown に（AGENTS.md ルール4 に方針明文化） | ✅ |
+| I-4 | 装着切替から腕の左右表記を削除 | ✅ |
+| I-5 | 座標軸ガイドボタンを右上に統一 | ✅ |
+
+### トラブルと知見
+
+1. **Xcode 同期グループが CLI 追加の新規ファイルを認識せずビルド失敗**
+   （AxisGuideView.swift、白紙アイコン）。Clean でも直らず。
+   → 既存ファイル（SwingDetailView.swift）へ統合して解決。以後、新規ファイル追加時は注意
+2. **プロジェクトは SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor**（Xcode 26 デフォルト）。
+   純関数パーサに nonisolated 明示が必要
+3. **RealityKit UnlitMaterial は alpha 0 でも黒描画される**（透明ボックス不可）
+4. **CLI からの実機 Run 手順を確立**:
+   `xcrun devicectl device install app --device <ID> <.app>` →
+   `xcrun devicectl device process launch --device <ID> <bundleId>`
+   （要: iPhone USB 接続、Watch はロック解除・点灯。ロック中は FBSOpenApplicationErrorDomain 7）
+
+### 既知の課題（持ち越し）
+
+- **I-1 残**: 3D モデル初期表示サイズ。境界拡大2案とも効果なし。
+  次の一手は明示的 PerspectiveCamera。メイン機能でないためユーザー判断でスキップ
+- 画面消灯中の計測継続テスト / Watch warning 6件 / バッテリー実測（詳細 PHASE2_PLAN.md）
+
+---
+
+## ネクストアクション
+
+1. **Phase 3 着手**: Core ML Integration（docs/REQUIREMENTS.md §7）
+   - F-I3: アノテーション（手動タグ付け）機能で学習データ作成
+   - F-W7: Create ML ショット分類モデル
+   - 学習データ収集・アノテーション方針・精度目標を Phase 3 開始時に定義
+2. **練習での実データ収集**: 実際のテニス練習で計測し、学習データを貯め始める
+3. **持ち越し（小粒）**: I-1 3Dサイズ / 消灯テスト / warning 6件 / バッテリー実測
