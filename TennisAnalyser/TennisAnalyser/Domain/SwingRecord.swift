@@ -7,6 +7,33 @@
 
 import Foundation
 
+/// ショット種別（6分類、F-I3 アノテーション用）
+///
+/// Watch 側 `MotionSample.ShotClass`（TennisAnalyser Watch App/Domain/Entities/MotionSample.swift）
+/// と rawValue を一致させること。ターゲットが別のため独立定義（CSV の文字列経由で往復する）。
+enum ShotClass: String, Equatable, Sendable, CaseIterable, Identifiable {
+    case strokeForehand = "STROKE_FOREHAND"
+    case strokeBackhand = "STROKE_BACKHAND"
+    case volleyForehand = "VOLLEY_FOREHAND"
+    case volleyBackhand = "VOLLEY_BACKHAND"
+    case serve          = "SERVE"
+    case other           = "OTHER"
+
+    var id: String { rawValue }
+
+    /// 一覧・詳細画面での表示名
+    var displayName: String {
+        switch self {
+        case .strokeForehand: return "ストローク(フォア)"
+        case .strokeBackhand: return "ストローク(バック)"
+        case .volleyForehand: return "ボレー(フォア)"
+        case .volleyBackhand: return "ボレー(バック)"
+        case .serve: return "サーブ"
+        case .other: return "その他"
+        }
+    }
+}
+
 /// 1サンプル分のセンサーデータ（波形表示用）
 struct SwingSamplePoint: Identifiable {
     let id = UUID()
@@ -31,6 +58,8 @@ struct SwingRecord: Identifiable, Equatable {
     let detectedAt: Date?
     let impactTimestampMs: Int64?
     let peakAcceleration: Double?
+    /// F-I3: 手動タグ付けされたショット種別（未設定は nil）
+    let shotClass: ShotClass?
     let fileURL: URL
 
     static func == (lhs: SwingRecord, rhs: SwingRecord) -> Bool { lhs.id == rhs.id }
@@ -88,8 +117,47 @@ enum SwingCSVParser {
             detectedAt: meta["DetectedAt"].flatMap { ISO8601DateFormatter().date(from: $0) },
             impactTimestampMs: meta["ImpactTimestampMs"].flatMap(Int64.init),
             peakAcceleration: meta["PeakAcceleration"].flatMap(Double.init),
+            shotClass: meta["ShotClass"].flatMap(ShotClass.init(rawValue:)),
             fileURL: fileURL
         )
+    }
+
+    /// スイングにショット種別を書き込む（F-I3 アノテーションの永続化）
+    ///
+    /// メタ情報ヘッダー（`# ShotClass: X`）と全データ行の ShotClass 列の両方に書き込む。
+    /// データ行にも書くのは Create ML の入力形式が「各サンプル行にラベルを持つ」のが
+    /// 一般的なため（Wave 2 の学習データエクスポートでそのまま使える形にしておく）。
+    nonisolated static func writeShotClass(fileURL: URL, shotClass: ShotClass) throws {
+        let content = try String(contentsOf: fileURL, encoding: .utf8)
+        var otherMetaLines: [String] = []
+        var headerLine: String?
+        var dataLines: [String] = []
+
+        for line in content.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.isEmpty {
+                continue
+            } else if line.hasPrefix("# ShotClass:") {
+                continue  // 既存の ShotClass 行は破棄し、末尾で新しい値を挿入する
+            } else if line.hasPrefix("#") {
+                otherMetaLines.append(String(line))
+            } else if line.hasPrefix("Timestamp") {
+                headerLine = String(line)
+            } else {
+                // データ行: 末尾の ShotClass 列を置き換える
+                var cols = line.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+                if !cols.isEmpty { cols[cols.count - 1] = shotClass.rawValue }
+                dataLines.append(cols.joined(separator: ","))
+            }
+        }
+
+        // 順序: その他メタ行 → ShotClass 行 → ヘッダー行 → データ行
+        var lines = otherMetaLines
+        lines.append("# ShotClass: \(shotClass.rawValue)")
+        if let headerLine { lines.append(headerLine) }
+        lines.append(contentsOf: dataLines)
+
+        let newContent = lines.joined(separator: "\n") + "\n"
+        try newContent.write(to: fileURL, atomically: true, encoding: .utf8)
     }
 
     /// 波形サンプルをパースする（詳細表示用）

@@ -11,7 +11,7 @@
 
 ## 現在地
 
-**未着手**（2026-07-19 計画策定）。次: P3-T1
+**P3-T1 完了**（2026-07-19）。次: P3-T2
 
 ## 前提となる意思決定（TBD の解消）
 
@@ -71,13 +71,10 @@ Watch 側 `MotionSample.ShotClass` は現状 `FOREHAND/BACKHAND/SERVE/OTHER` の
 
 ## タスク分解（Wave 1）
 
-- [ ] **P3-T1: ShotClass の6分類化 + CSV 往復**
-  - `MotionSample.ShotClass`（Watch）を6分類に変更
-  - iOS 側に対応する `ShotClass` enum を追加（`SwingRecord.swift`。ターゲット非共有のため独立定義、
-    既存の "Watch 側 Domain とはターゲットが別" コメント方針を踏襲）
-  - `SwingCSVParser.parseMetadata` に `shotClass` を追加
-  - 新規: `SwingCSVParser.writeShotClass(fileURL:shotClass:)` — メタ行 + 全データ行を書き換え
-  - DoD: ビルド green、パーサのユニットテスト追加
+- [x] **P3-T1: ShotClass の6分類化 + CSV 往復** ✅ 2026-07-19
+  - Watch/iOS 双方に6分類 ShotClass（rawValue 一致）
+  - `writeShotClass`: メタ行（`# ShotClass:`）とデータ行末尾を書き換え、順序（メタ→ヘッダー→データ）を保持
+  - ユニットテスト: Watch 2件 + iOS 3件、全PASS
 
 - [ ] **P3-T2: iOS — アノテーション UI（F-I3）**
   - `SwingDetailView` にショット種別選択メニューを追加、選択後 CSV へ永続化 + `SwingStore` 更新

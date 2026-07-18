@@ -44,6 +44,27 @@ struct SwingRepositoryImplTests {
         #expect(lines.contains("1000,0.500000,0.000000,0.000000,10.0000,20.0000,30.0000,"))
     }
 
+    @Test("ShotClass 指定時に CSV データ行の末尾へ rawValue が書き込まれる")
+    func buildsCSVWithShotClass() {
+        let samples = [MotionSample(
+            timestampMs: 1_000, accX: 1, accY: 0, accZ: 0,
+            gyroX: 0, gyroY: 0, gyroZ: 0, shotClass: .strokeForehand
+        )]
+        let swing = Swing(
+            id: "s", sessionId: "sess", sequence: 1,
+            impactTimestampMs: 1_000, detectedAt: Date(), samples: samples
+        )
+        let csv = SwingRepositoryImpl.buildCSV(from: swing)
+        #expect(csv.contains(",STROKE_FOREHAND"))
+    }
+
+    @Test("ShotClass の6分類すべてに一意な rawValue が定義されている")
+    func shotClassRawValuesAreUnique() {
+        let rawValues = Set(ShotClass.allCases.map(\.rawValue))
+        #expect(rawValues.count == ShotClass.allCases.count)
+        #expect(ShotClass.allCases.count == 6)
+    }
+
     @Test("保存 → 一覧 → 削除のラウンドトリップ")
     func saveListDeleteRoundtrip() async throws {
         let repo = SwingRepositoryImpl()

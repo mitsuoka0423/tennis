@@ -31,10 +31,16 @@ struct MotionSample: Equatable, Sendable {
     }
 }
 
-/// ショット種別
+/// ショット種別（6分類）
+///
+/// 要求2.3（試合モードのショット別分析）に合わせ、ストローク/ボレーをフォア・バックで区別する。
+/// rawValue は iOS 側の同名 enum（TennisAnalyser/Domain/SwingRecord.swift）と
+/// CSV 経由で往復するため一致させること。
 enum ShotClass: String, Equatable, Sendable, CaseIterable {
-    case forehand = "FOREHAND"
-    case backhand = "BACKHAND"
-    case serve    = "SERVE"
-    case other    = "OTHER"
+    case strokeForehand = "STROKE_FOREHAND"
+    case strokeBackhand = "STROKE_BACKHAND"
+    case volleyForehand = "VOLLEY_FOREHAND"
+    case volleyBackhand = "VOLLEY_BACKHAND"
+    case serve          = "SERVE"
+    case other           = "OTHER"
 }
