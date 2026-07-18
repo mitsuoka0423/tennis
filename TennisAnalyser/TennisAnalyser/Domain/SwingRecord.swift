@@ -62,8 +62,11 @@ extension Date {
 
 enum SwingCSVParser {
 
+    // 注: プロジェクトは SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor のため、
+    // 純関数のパーサは nonisolated を明示してバックグラウンドから呼べるようにする
+
     /// メタ情報のみをパースする（一覧表示用・先頭行のみ読む軽量処理）
-    static func parseMetadata(fileURL: URL) -> SwingRecord? {
+    nonisolated static func parseMetadata(fileURL: URL) -> SwingRecord? {
         guard let content = try? String(contentsOf: fileURL, encoding: .utf8) else { return nil }
         var meta: [String: String] = [:]
         for line in content.split(separator: "\n", omittingEmptySubsequences: true) {
@@ -90,7 +93,7 @@ enum SwingCSVParser {
     }
 
     /// 波形サンプルをパースする（詳細表示用）
-    static func parseSamples(fileURL: URL) -> [SwingSamplePoint] {
+    nonisolated static func parseSamples(fileURL: URL) -> [SwingSamplePoint] {
         guard let content = try? String(contentsOf: fileURL, encoding: .utf8) else { return [] }
         return content.split(separator: "\n").compactMap { line -> SwingSamplePoint? in
             guard !line.hasPrefix("#"), !line.hasPrefix("Timestamp") else { return nil }
