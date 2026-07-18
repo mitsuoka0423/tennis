@@ -125,9 +125,19 @@ private struct RecordingView: View {
                 .font(.system(size: 36, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white)
 
-            // サンプル数 / 実測Hz / ロス率
+            // スイング数 / 転送状況 / 実測Hz / ロス率（F-W6: 動作確認用の簡易表示）
             VStack(spacing: 2) {
-                StatRow(label: "サンプル数", value: "\(viewModel.sampleCount.formatted())")
+                StatRow(
+                    label: "スイング",
+                    value: "\(viewModel.swingCount)",
+                    valueColor: .green
+                )
+                StatRow(
+                    label: "転送済み",
+                    value: viewModel.pendingTransferCount > 0
+                        ? "\(viewModel.transferredCount) (残\(viewModel.pendingTransferCount))"
+                        : "\(viewModel.transferredCount)"
+                )
                 StatRow(
                     label: "実測Hz",
                     value: viewModel.measuredHz > 0
