@@ -180,16 +180,17 @@ enum AxisPalette {
 struct AxisGuideView: View {
 
     @Environment(\.dismiss) private var dismiss
-    /// 装着スタイル（ユーザーは右腕・リューズ左が既定）
+    /// Digital Crown の位置（I-4: 腕の左右は表記しない。既定はユーザーの装着 = Crown 左）
     @State private var crownOnLeft = true
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    Picker("装着スタイル", selection: $crownOnLeft) {
-                        Text("リューズ左（右腕）").tag(true)
-                        Text("リューズ右（左腕）").tag(false)
+                    // I-3: Apple 製品の呼称は正式名称（Digital Crown）を使用
+                    Picker("Digital Crown の位置", selection: $crownOnLeft) {
+                        Text("Digital Crown 左").tag(true)
+                        Text("Digital Crown 右").tag(false)
                     }
                     .pickerStyle(.segmented)
 
@@ -226,7 +227,7 @@ struct AxisGuideView: View {
                         Text("チャートの読み方")
                             .font(.subheadline.bold())
                         Text("""
-                        ・軸は Watch の画面基準です。リューズが左右どちらの装着でも軸の向きは変わりません。
+                        ・軸は Watch の画面基準です。Digital Crown が左右どちらの装着でも軸の向きは変わりません。
                         ・加速度: 各軸方向への並進運動 (g)。重力は除去済みです。
                         ・角速度: 各軸まわりの回転 (°/s)。軸の正方向に右ねじが進む回転が正です。
                         ・腕の向きが変わると、世界座標（コート基準）に対する軸の向きは変わります。
@@ -318,7 +319,7 @@ private struct Watch3DAxisView: View {
             root.addChild(band)
         }
 
-        // リューズ（装着スタイルに応じて左右）
+        // Digital Crown（装着スタイルに応じて左右）
         let crown = ModelEntity(
             mesh: .generateCylinder(height: 0.14, radius: 0.09),
             materials: [bandMaterial]
@@ -326,6 +327,14 @@ private struct Watch3DAxisView: View {
         crown.orientation = simd_quatf(angle: .pi / 2, axis: [0, 0, 1])  // Y軸円柱 → X方向へ
         crown.position = [crownOnLeft ? -0.62 : 0.62, 0.2, 0]
         root.addChild(crown)
+
+        // I-1: 透明の境界ボックスでカメラの初期フレーミングを広げ、
+        // モデルが画面の約50%で表示されるようにする（orbit カメラは可視境界に合わせてズームするため）
+        let spacer = ModelEntity(
+            mesh: .generateBox(width: 8.0, height: 8.0, depth: 0.01),
+            materials: [UnlitMaterial(color: UIColor(white: 0, alpha: 0))]
+        )
+        root.addChild(spacer)
 
         // 座標軸（画面基準・リューズ位置に依らず固定）
         root.addChild(axisArrow(direction: [1, 0, 0], colorHex: (0x42, 0x69, 0xD0), label: "+X"))

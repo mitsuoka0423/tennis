@@ -23,14 +23,8 @@ struct ContentView: View {
             }
             .navigationTitle("スイング")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        showsAxisGuide = true
-                    } label: {
-                        Image(systemName: "move.3d")
-                    }
-                    .accessibilityLabel("座標軸ガイド")
-                }
+                // I-5: 座標軸ガイドは詳細画面と同じ右上に統一
+                // （詳細画面は戻るボタンが左上を占めるため、右上が共通位置として自然）
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         store.reload()
@@ -38,6 +32,14 @@ struct ContentView: View {
                         Image(systemName: "arrow.clockwise")
                     }
                     .accessibilityLabel("再読み込み")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showsAxisGuide = true
+                    } label: {
+                        Image(systemName: "move.3d")
+                    }
+                    .accessibilityLabel("座標軸ガイド")
                 }
             }
             .sheet(isPresented: $showsAxisGuide) {

@@ -160,15 +160,9 @@ private struct RecordingView: View {
     }
 
     /// スイング数と転送状況の1行表示
-    /// 例: "3"（転送前） / "3 (残1)"（転送中） / "3 / 転送済"（全件転送完了）
+    /// W-3: 転送前後で表記を変えず常に "n (残m)" 形式で統一
     private var swingStatValue: String {
-        if viewModel.pendingTransferCount > 0 {
-            return "\(viewModel.swingCount) (残\(viewModel.pendingTransferCount))"
-        }
-        if viewModel.transferredCount > 0 {
-            return "\(viewModel.swingCount) / 転送済"
-        }
-        return "\(viewModel.swingCount)"
+        "\(viewModel.swingCount) (残\(viewModel.pendingTransferCount))"
     }
 
     /// ロス率に応じた色: 1%未満=緑、5%未満=黄、それ以上=赤
