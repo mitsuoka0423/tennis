@@ -41,11 +41,14 @@ Wave 2（Core ML 学習）の学習データ品質が上がる。目的は Phase
   - `willResignActiveNotification` で自動停止（バックグラウンド遷移時のファイル破損防止）
   - 実機カメラ動作は T3（UI結線）後に確認
 
-- [ ] **T3: Presentation — 録画タブ**
-  - `RecordingCameraView.swift`: カメラプレビュー（`AVCaptureVideoPreviewLayer` の
-    UIViewRepresentable）+ 開始/停止ボタン + 録画中インジケーター
-  - `TennisAnalyserApp.swift` / ルートビューを `TabView`（スイング / 録画）に変更
-  - DoD: ビルド green
+- [x] **T3: Presentation — 録画タブ** ✅ 2026-07-18
+  - `RecordingCameraView`: `CameraPreviewView`（AVCaptureVideoPreviewLayer の
+    UIViewRepresentable）+ 録画ボタン + 経過時間バッジ + 権限拒否時の設定誘導
+  - `TennisAnalyserApp`: `TabView`（スイング/録画）に変更。`PracticeVideoRecorder` は
+    App 側で1つだけ生成し `videoStore` と同一インスタンスを共有（環境注入）
+  - 設計修正: `RecordingCameraView.init()` 内で仮の `VideoStore` を生成する初期実装は、
+    environmentObject の `videoStore` と別インスタンスになり保存した動画が一覧に
+    反映されないバグだったため、App 側で一元生成する方式に直した
 
 - [ ] **T4: Presentation — 詳細画面への動画統合（F-I6 本体）**
   - `SwingDetailView` 上部に動画プレイヤー領域を追加。`VideoStore` で該当スイングの
