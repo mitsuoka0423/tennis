@@ -19,7 +19,8 @@
 
 ## 現在地
 
-**P2-T3 完了**（2026-07-18）。次: P2-T4
+**P2-T6 完了**（2026-07-18）。次: P2-T7（実機 E2E 検証、ユーザー操作が必要）
+- T6 のシミュレータ表示確認は T7 実機 E2E に統合（実データでの確認が本質のため）
 
 ---
 
@@ -43,17 +44,16 @@
     - 転送完了コールバックでローカル CSV 削除（F-W5 + ストレージ保護）
     - 未転送分はワークアウト終了時に再送
   - DoD: ビルド green（実機E2EはT7でまとめて）
-- [ ] **P2-T4: Watch — 簡易表示の整理（F-W6）**
-  - 既存 UI（サンプル数・Hz・ロス率）に **スイング数** と **転送済み数** を追加
-  - DoD: ビルド green、シミュレータで表示確認
-- [ ] **P2-T5: iOS — 受信ハンドラ（F-I1）**
+- [x] **P2-T4: Watch — 簡易表示の整理（F-W6）** ✅ 2026-07-18
+  - 既存 UI にスイング数・転送状況（転送済み/残）を追加
+- [x] **P2-T5: iOS — 受信ハンドラ（F-I1）** ✅ 2026-07-18
   - 新規: `TennisAnalyser/Infrastructure/PhoneSessionManager.swift`（WCSessionDelegate、file 受信 → Documents/swings/ へ格納）
   - 新規: `TennisAnalyser/Infrastructure/SwingStore.swift`（受信済みスイングの列挙・CSV パース）
   - DoD: ビルド green
-- [ ] **P2-T6: iOS — スイング一覧 + 波形表示（F-I2）**
-  - `ContentView.swift` を置き換え: スイング一覧（時刻・連番、新着自動反映）
-  - 新規: `SwingDetailView.swift`（Swift Charts で加速度・角速度波形）
-  - DoD: ビルド green、シミュレータ（テストCSV注入）で表示確認
+- [x] **P2-T6: iOS — スイング一覧 + 波形表示（F-I2）** ✅ 2026-07-18
+  - `ContentView.swift`: セッション別グループのスイング一覧（連番・時刻・ピークG、スワイプ削除）
+  - `SwingDetailView.swift`: Swift Charts で加速度・角速度の3軸波形
+    （X=#4269D0/Y=#B45309/Z=#3CA951、dataviz バリデータ両モードPASS、インパクト基準線付き）
 - [ ] **P2-T7: 実機 E2E 検証**
   - Watch でスイング → 約10秒以内に iPhone 一覧に出る → 波形表示
   - Watch 側キャッシュが転送後に消えている

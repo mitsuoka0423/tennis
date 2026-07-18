@@ -29,6 +29,7 @@ struct SwingRecord: Identifiable, Equatable {
     let sessionId: String
     let sequence: Int
     let detectedAt: Date?
+    let impactTimestampMs: Int64?
     let peakAcceleration: Double?
     let fileURL: URL
 
@@ -60,6 +61,7 @@ enum SwingCSVParser {
             sessionId: sessionId,
             sequence: sequence,
             detectedAt: meta["DetectedAt"].flatMap { ISO8601DateFormatter().date(from: $0) },
+            impactTimestampMs: meta["ImpactTimestampMs"].flatMap(Int64.init),
             peakAcceleration: meta["PeakAcceleration"].flatMap(Double.init),
             fileURL: fileURL
         )
