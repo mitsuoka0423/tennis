@@ -50,12 +50,14 @@ Wave 2（Core ML 学習）の学習データ品質が上がる。目的は Phase
     environmentObject の `videoStore` と別インスタンスになり保存した動画が一覧に
     反映されないバグだったため、App 側で一元生成する方式に直した
 
-- [ ] **T4: Presentation — 詳細画面への動画統合（F-I6 本体）**
-  - `SwingDetailView` 上部に動画プレイヤー領域を追加。`VideoStore` で該当スイングの
-    `detectedAt` を含む動画を検索し、見つかれば該当位置にシークした `AVPlayer` を表示
-  - 再生/一時停止、スロー再生トグル（0.25x/0.5x/1.0x）
+- [x] **T4: Presentation — 詳細画面への動画統合（F-I6 本体）** ✅ 2026-07-18
+  - `VideoSyncPlayerView`: `AVPlayer` をインパクト前後±2秒でシーク・その区間をループ再生。
+    再生/一時停止、速度切り替え（0.25x/0.5x/1.0x）
+  - `SwingDetailView`: `matchedVideo(for:)` で `record.detectedAt` を含む動画を検索し、
+    見つかれば動画をヘッダー直下・波形の上に表示（要求通り「上部に動画・下部に波形」）
   - 見つからない場合は「対応する動画がありません」の軽い表示（エラーにしない）
-  - DoD: ビルド green
+  - Why not 正確なウィンドウ幅: pre/post 秒数は Watch 側で調整可能だが、動画同期は目視確認用途の
+    ため既定値（前後2秒）の近似で十分と判断（コード内コメント参照）
 
 - [ ] **T5: ドキュメント更新**
   - REQUIREMENTS.md: F-I6 の TBD（同期方式）を解消し、前倒しの経緯を記録

@@ -13,6 +13,7 @@ struct SwingDetailView: View {
     /// F-I3: 一覧の最新状態から該当スイングを引く（タグ付け直後に表示へ反映するため）
     let recordId: String
     @EnvironmentObject private var store: SwingStore
+    @EnvironmentObject private var videoStore: VideoStore
 
     @State private var samples: [SwingSamplePoint] = []
     @State private var isLoading = true
@@ -73,6 +74,9 @@ struct SwingDetailView: View {
             VStack(alignment: .leading, spacing: 24) {
                 header(for: record)
 
+                // F-I6: 上部に動画（見つかった場合のみ）
+                videoSection(for: record)
+
                 if isLoading {
                     ProgressView("読み込み中...")
                         .frame(maxWidth: .infinity, minHeight: 200)
@@ -94,6 +98,31 @@ struct SwingDetailView: View {
                 }
             }
             .padding()
+        }
+    }
+
+    // MARK: - Video (F-I6)
+
+    /// `record.detectedAt` を含む動画とインパクトの再生位置（秒）
+    private func matchedVideo(for record: SwingRecord) -> (video: PracticeVideo, offsetSeconds: Double)? {
+        guard let detectedAt = record.detectedAt,
+              let video = videoStore.video(containing: detectedAt),
+              let offset = video.offsetSeconds(for: detectedAt)
+        else { return nil }
+        return (video, offset)
+    }
+
+    @ViewBuilder
+    private func videoSection(for record: SwingRecord) -> some View {
+        if let match = matchedVideo(for: record) {
+            VideoSyncPlayerView(video: match.video, impactOffsetSeconds: match.offsetSeconds)
+        } else {
+            HStack(spacing: 6) {
+                Image(systemName: "video.slash")
+                Text("対応する動画がありません")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
     }
 
