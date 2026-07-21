@@ -189,6 +189,14 @@ final class VideoStore: ObservableObject {
             start: CMTime(seconds: startSeconds, preferredTimescale: 600),
             end: CMTime(seconds: endSeconds, preferredTimescale: 600)
         )
+        // Why not プリセットのみ: プリセット指定の再エンコードは元動画の向きメタデータ
+        // （preferredTransform）を落とすため、横向き録画でもクリップが縦向きになる。
+        // videoComposition(withPropertiesOf:) は元動画の向き・サイズを反映した合成を作り、
+        // 向きをピクセルに焼き込んで出力するため、再生側の解釈に依存せず正しい向きになる。
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        if !videoTracks.isEmpty {
+            export.videoComposition = try await AVMutableVideoComposition.videoComposition(withPropertiesOf: asset)
+        }
         try await export.export(to: destURL, as: .mov)
     }
 }
