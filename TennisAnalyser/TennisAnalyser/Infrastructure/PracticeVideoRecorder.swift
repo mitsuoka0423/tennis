@@ -41,6 +41,15 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
     private let sessionQueue = DispatchQueue(label: "com.spleeing.TennisAnalyser.cameraSession")
     private var isConfigured = false
 
+    // 端末の物理的な向きを加速度センサーで追跡し、プレビュー・録画それぞれに
+    // 水平基準の回転角度を提供する（F-I6 横向き対応）。
+    // Why not UIDevice.orientation: 三脚固定では faceUp 等になり信頼できないため、
+    // Apple 推奨の RotationCoordinator を使う。
+    private var videoDevice: AVCaptureDevice?
+    private weak var previewLayer: AVCaptureVideoPreviewLayer?
+    private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+    private var previewRotationObservation: NSKeyValueObservation?
+
     private let videoStore: VideoStore
     private var pendingSessionId: String?
     private var recordingStartedAt: Date?
@@ -104,7 +113,47 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
             self.session.addOutput(self.movieOutput)
             self.session.commitConfiguration()
             self.session.startRunning()
+
+            Task { @MainActor in
+                self.videoDevice = device
+                self.setUpRotationCoordinator()
+            }
         }
+    }
+
+    // MARK: - Orientation（F-I6 横向き対応）
+
+    /// プレビューレイヤーを受け取り、回転追跡をセットアップする（View の生成時に呼ぶ）
+    @MainActor
+    func attachPreviewLayer(_ layer: AVCaptureVideoPreviewLayer) {
+        layer.session = session
+        previewLayer = layer
+        setUpRotationCoordinator()
+    }
+
+    /// デバイスとプレビューレイヤーが揃った時点で RotationCoordinator を構成する。
+    /// 片方が未確定でも（プレビュー未表示など）デバイスさえあれば録画用の角度は得られる。
+    @MainActor
+    private func setUpRotationCoordinator() {
+        guard let videoDevice else { return }
+        let coordinator = AVCaptureDevice.RotationCoordinator(device: videoDevice, previewLayer: previewLayer)
+        rotationCoordinator = coordinator
+
+        applyPreviewRotation(coordinator.videoRotationAngleForHorizonLevelPreview)
+        // プレビューの向きは端末回転に追従してリアルタイム更新する
+        previewRotationObservation = coordinator.observe(
+            \.videoRotationAngleForHorizonLevelPreview, options: [.new]
+        ) { [weak self] _, change in
+            guard let angle = change.newValue else { return }
+            Task { @MainActor in self?.applyPreviewRotation(angle) }
+        }
+    }
+
+    @MainActor
+    private func applyPreviewRotation(_ angle: CGFloat) {
+        guard let connection = previewLayer?.connection,
+              connection.isVideoRotationAngleSupported(angle) else { return }
+        connection.videoRotationAngle = angle
     }
 
     // MARK: - Recording（Watch からのセッション通知で呼ばれる。F-I6）
@@ -116,7 +165,15 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
             return
         }
         pendingSessionId = sessionId
+        // 録画開始時点の向きをファイルに固定する（三脚固定で先に向きを決めてから
+        // Watch で計測開始する運用のため、開始時の角度を採用すれば十分）
+        let captureAngle = rotationCoordinator?.videoRotationAngleForHorizonLevelCapture
         sessionQueue.async { [movieOutput] in
+            if let captureAngle,
+               let connection = movieOutput.connection(with: .video),
+               connection.isVideoRotationAngleSupported(captureAngle) {
+                connection.videoRotationAngle = captureAngle
+            }
             movieOutput.startRecording(to: url, recordingDelegate: self)
         }
     }

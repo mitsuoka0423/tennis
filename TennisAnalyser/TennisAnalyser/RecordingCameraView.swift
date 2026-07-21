@@ -44,7 +44,7 @@ struct RecordingCameraView: View {
 
     private var cameraContent: some View {
         ZStack {
-            CameraPreviewView(session: recorder.session)
+            CameraPreviewView(recorder: recorder)
                 .ignoresSafeArea()
 
             VStack {
@@ -121,13 +121,15 @@ private extension PracticeVideoRecorder {
 // MARK: - CameraPreviewView
 
 /// `AVCaptureVideoPreviewLayer` を表示する UIViewRepresentable
+///
+/// プレビューレイヤーを recorder に渡すことで、端末回転に追従した向き制御を委ねる（F-I6）
 private struct CameraPreviewView: UIViewRepresentable {
-    let session: AVCaptureSession
+    let recorder: PracticeVideoRecorder
 
     func makeUIView(context: Context) -> PreviewUIView {
         let view = PreviewUIView()
-        view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
+        recorder.attachPreviewLayer(view.previewLayer)
         return view
     }
 
