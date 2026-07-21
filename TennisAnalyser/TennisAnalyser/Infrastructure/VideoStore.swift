@@ -169,7 +169,9 @@ final class VideoStore: ObservableObject {
             if !fileManager.fileExists(atPath: destDir.path) {
                 try fileManager.createDirectory(at: destDir, withIntermediateDirectories: true)
             }
+            await Self.logOrientation(label: "source", url: sourceURL)
             try await exportClip(from: sourceURL, to: destURL, startSeconds: startSeconds, endSeconds: endSeconds)
+            await Self.logOrientation(label: "clip", url: destURL)
             reloadClipKeys()
             print("[VideoStore] clip extracted: \(sessionId)/\(sequence).mov")
         } catch {
@@ -198,6 +200,19 @@ final class VideoStore: ObservableObject {
             export.videoComposition = try await AVMutableVideoComposition.videoComposition(withPropertiesOf: asset)
         }
         try await export.export(to: destURL, as: .mov)
+    }
+
+    /// 診断用: 動画の保存サイズと向き変換をログ出力する（F-I6 向き問題の切り分け）
+    static func logOrientation(label: String, url: URL) async {
+        let asset = AVURLAsset(url: url)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first else {
+            print("[Orient] \(label): 動画トラックなし (\(url.lastPathComponent))")
+            return
+        }
+        let size = (try? await track.load(.naturalSize)) ?? .zero
+        let t = (try? await track.load(.preferredTransform)) ?? .identity
+        let angle = Int((atan2(t.b, t.a) * 180 / .pi).rounded())
+        print("[Orient] \(label) \(url.lastPathComponent): naturalSize=\(Int(size.width))x\(Int(size.height)) transform回転=\(angle)° (a:\(t.a) b:\(t.b) c:\(t.c) d:\(t.d))")
     }
 }
 
