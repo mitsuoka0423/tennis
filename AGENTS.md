@@ -26,6 +26,11 @@
 4. 製品・機能の呼称は公式の正式名称を使うこと(方針2)
    - Apple 製品の部位・機能は Apple 公式の日本語表記に従う
    - UI 文言・ドキュメント・コードコメントすべてに適用する
+5. コードを変更したら必ずビルドが通ることを確認すること(方針2,3)
+   - CLI (`xcodebuild`) と、Xcode MCP が使える場合は Xcode 経由（`BuildProject`）の両方を確認する
+   - 両者の結果が食い違う場合は Xcode エディタのバッファ同期不良を疑い、
+     `XcodeWrite` → `XcodeRefreshCodeIssuesInFile` → `BuildProject` の順で解消してから完了とする
+   - Xcode MCP が無い環境では、ユーザーに Xcode でのビルド確認を依頼する
 
 ## ガイドライン
 
