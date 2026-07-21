@@ -168,15 +168,11 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
         // 録画開始時点の向きをファイルに固定する（三脚固定で先に向きを決めてから
         // Watch で計測開始する運用のため、開始時の角度を採用すれば十分）
         let captureAngle = rotationCoordinator?.videoRotationAngleForHorizonLevelCapture
-        print("[Recorder] startRecording captureAngle=\(String(describing: captureAngle)) coordinatorExists=\(rotationCoordinator != nil)")
         sessionQueue.async { [movieOutput] in
             if let captureAngle,
                let connection = movieOutput.connection(with: .video),
                connection.isVideoRotationAngleSupported(captureAngle) {
                 connection.videoRotationAngle = captureAngle
-                print("[Recorder] applied videoRotationAngle=\(captureAngle) to capture connection")
-            } else {
-                print("[Recorder] capture rotation NOT applied (angle=\(String(describing: captureAngle)))")
             }
             movieOutput.startRecording(to: url, recordingDelegate: self)
         }
