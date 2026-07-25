@@ -162,6 +162,17 @@ final class VideoStore: ObservableObject {
         try sessionDirectory(sessionId).appendingPathComponent(RecordingSegment.fileName(for: index))
     }
 
+    /// 既存セグメントのファイル URL（実体が無ければ nil）
+    ///
+    /// `newSegmentURL` と分けているのは、こちらがディレクトリを作らない読み取り専用の
+    /// 問い合わせであるため（連続タイムラインの再生に用いる。W6-T16b）。
+    func existingSegmentURL(sessionId: String, segment: RecordingSegment) -> URL? {
+        guard let dir = try? sourcesDirectory.appendingPathComponent(sessionId, isDirectory: true)
+        else { return nil }
+        let url = dir.appendingPathComponent(segment.fileName)
+        return fileManager.fileExists(atPath: url.path) ? url : nil
+    }
+
     /// セッションの開始を記録する（未登録なら manifest を作る）
     func registerSessionStart(sessionId: String, startedAt: Date) {
         guard !sessions.contains(where: { $0.id == sessionId }) else { return }
