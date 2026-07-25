@@ -21,10 +21,10 @@ final class PhoneSessionManager: NSObject {
     private let recorder: PracticeVideoRecorder
     private let diagnostics: DiagnosticsStore
 
-    /// セッション終了通知からこの秒数だけ待ってから継続録画（中間データ）を削除する。
+    /// セッション終了通知からこの秒数だけ待ってから、未生成クリップの生成を試みる。
     /// Watch→iPhone のスイング転送は F-W5 で「10秒以内」を目安としているため、
     /// 遅延到着分の処理猶予として十分な余裕を持たせる。
-    private static let sourceCleanupDelaySeconds: UInt64 = 60
+    private static let clipRetryDelaySeconds: UInt64 = 60
 
     init(
         store: SwingStore,
@@ -92,32 +92,39 @@ extension PhoneSessionManager: WCSessionDelegate {
             switch status {
             case "started":
                 AppLog.session.info("session started: \(sessionId, privacy: .public)")
-                self.diagnostics.record(.sessionStarted(at: Date()), for: sessionId)
+                let startedAt = Date()
+                self.diagnostics.record(.sessionStarted(at: startedAt), for: sessionId)
+                self.videoStore.registerSessionStart(sessionId: sessionId, startedAt: startedAt)
                 self.recorder.startRecording(sessionId: sessionId)
             case "ended":
                 AppLog.session.info("session ended: \(sessionId, privacy: .public)")
-                self.diagnostics.record(.sessionEnded(at: Date()), for: sessionId)
+                let endedAt = Date()
+                self.diagnostics.record(.sessionEnded(at: endedAt), for: sessionId)
                 self.recorder.stopRecording()
-                self.scheduleSourceCleanup(sessionId: sessionId)
+                self.videoStore.registerSessionEnd(sessionId: sessionId, endedAt: endedAt)
+                self.scheduleRemainingClips(sessionId: sessionId)
             default:
                 break
             }
         }
     }
 
-    /// セッション終了から猶予時間後に、残っているスイングのクリップ化を試みてから
-    /// 継続録画（中間データ）を削除する
+    /// セッション終了から猶予時間後に、残っているスイングのクリップ化を試みる
+    ///
+    /// Why not 生成後にセグメントを削除する（2026-07-25 まではそうしていた）:
+    /// セグメントは一次データであり、クリップは何度でも再生成できる派生データにすぎない
+    /// （F-I7-4）。旧実装はセッション終了60秒後にセグメントを無条件削除しており、
+    /// 2026-07-21 はクリップ生成に失敗した時点で素材ごと失われ、原因を追えなくなった。
     @MainActor
-    private func scheduleSourceCleanup(sessionId: String) {
+    private func scheduleRemainingClips(sessionId: String) {
         Task {
-            try? await Task.sleep(nanoseconds: Self.sourceCleanupDelaySeconds * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: Self.clipRetryDelaySeconds * 1_000_000_000)
             let pendingRecords = self.store.records.filter { $0.sessionId == sessionId }
             for record in pendingRecords {
                 await self.videoStore.extractClipIfNeeded(
                     sessionId: record.sessionId, sequence: record.sequence, detectedAt: record.detectedAt
                 )
             }
-            self.videoStore.deleteSource(sessionId: sessionId)
         }
     }
 }

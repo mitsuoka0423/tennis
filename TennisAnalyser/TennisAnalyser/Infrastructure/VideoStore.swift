@@ -17,9 +17,13 @@ import os
 
 /// 練習動画の保管庫
 ///
-/// - **継続録画（中間データ）**: `Documents/video_sources/{sessionId}.mov` + `.json`
+/// - **セッション録画（一次データ）**: `Documents/video_sources/{sessionId}/manifest.json` + `{index}.mov`
 ///   （Watch の sessionId をそのまま識別子に使う）
-/// - **スイング単位クリップ（最終データ）**: `Documents/videos/{sessionId}/{sequence}.mov`
+/// - **スイング単位クリップ（派生データ）**: `Documents/videos/{sessionId}/{sequence}.mov`
+///
+/// Why not クリップを一次データ扱いする: セグメントさえ残っていればクリップは
+/// 何度でも再生成できる。2026-07-21 はクリップ生成に失敗した時点で素材ごと
+/// 失われたため原因を追えなかった（F-I7-4）。
 @MainActor
 final class VideoStore: ObservableObject {
 
@@ -27,8 +31,8 @@ final class VideoStore: ObservableObject {
     /// SwiftUI に変更を伝えるための Published プロパティ（ディスクの実体は都度確認しない）
     @Published private(set) var availableClipKeys: Set<String> = []
 
-    /// 継続録画（中間データ）の一覧
-    private(set) var sources: [PracticeVideo] = []
+    /// セッション録画の一覧
+    private(set) var sessions: [RecordingSession] = []
 
     private let fileManager = FileManager.default
     private let diagnostics: DiagnosticsStore
@@ -36,6 +40,20 @@ final class VideoStore: ObservableObject {
     /// クリップの前後窓（秒）。`VideoSyncPlayerView` の相対時間計算と一致させること。
     static let preRollSeconds = 2.0
     static let postRollSeconds = 2.0
+
+    private static let manifestName = "manifest.json"
+
+    private static let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }()
+
+    private static let decoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }()
 
     init(diagnostics: DiagnosticsStore) {
         self.diagnostics = diagnostics
@@ -71,19 +89,35 @@ final class VideoStore: ObservableObject {
     private func reloadSources() {
         do {
             let dir = try sourcesDirectory
-            let files = try fileManager.contentsOfDirectory(
+            let entries = try fileManager.contentsOfDirectory(
                 at: dir, includingPropertiesForKeys: nil, options: .skipsHiddenFiles
             )
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            sources = files
-                .filter { $0.pathExtension == "json" }
-                .compactMap { url -> PracticeVideo? in
-                    guard let data = try? Data(contentsOf: url) else { return nil }
-                    return try? decoder.decode(PracticeVideo.self, from: data)
-                }
+            sessions = entries
+                .filter { $0.hasDirectoryPath }
+                .compactMap { loadManifest(at: $0.appendingPathComponent(Self.manifestName)) }
         } catch {
             AppLog.clip.error("reloadSources failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func loadManifest(at url: URL) -> RecordingSession? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? Self.decoder.decode(RecordingSession.self, from: data)
+    }
+
+    /// 旧レイアウト（`{sessionId}.mov` + `.json`）の残骸を削除する
+    ///
+    /// Why not 移行処理: 2026-07-21 時点で `video_sources/` は空であり、
+    /// 移行すべき実データが存在しない。書いても検証できない処理は持たない。
+    func removeLegacyLayout() {
+        guard let dir = try? sourcesDirectory,
+              let entries = try? fileManager.contentsOfDirectory(
+                  at: dir, includingPropertiesForKeys: nil, options: .skipsHiddenFiles
+              )
+        else { return }
+        for entry in entries where !entry.hasDirectoryPath {
+            try? fileManager.removeItem(at: entry)
+            AppLog.clip.info("removed legacy source: \(entry.lastPathComponent, privacy: .public)")
         }
     }
 
@@ -106,32 +140,96 @@ final class VideoStore: ObservableObject {
         availableClipKeys = keys
     }
 
-    /// 新しい継続録画の保存先ファイル URL を発行する（録画開始時に呼ぶ）
-    func newSourceRecordingURL(sessionId: String) throws -> URL {
-        try sourcesDirectory.appendingPathComponent("\(sessionId).mov")
+    /// セッションのディレクトリ（無ければ作る）
+    private func sessionDirectory(_ sessionId: String) throws -> URL {
+        let dir = try sourcesDirectory.appendingPathComponent(sessionId, isDirectory: true)
+        if !fileManager.fileExists(atPath: dir.path) {
+            try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir
     }
 
-    /// 継続録画の完了時にメタデータを保存する
-    func saveSourceMetadata(_ video: PracticeVideo) {
-        do {
-            let dir = try sourcesDirectory
-            let url = dir.appendingPathComponent("\(video.id).json")
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            let data = try encoder.encode(video)
-            try data.write(to: url, options: .atomic)
-            reloadSources()
-        } catch {
-            AppLog.clip.error("saveSourceMetadata failed: \(error.localizedDescription, privacy: .public)")
+    /// 次に録画するセグメントの番号
+    func nextSegmentIndex(sessionId: String) -> Int {
+        sessions.first(where: { $0.id == sessionId })?.nextSegmentIndex ?? 0
+    }
+
+    /// 新しいセグメントの保存先 URL を発行する（録画開始要求時に呼ぶ）
+    ///
+    /// この時点では manifest へ登録しない。実際に録画が始まらないことがあるため、
+    /// 登録は `registerSegmentStart` で行う。
+    func newSegmentURL(sessionId: String, index: Int) throws -> URL {
+        try sessionDirectory(sessionId).appendingPathComponent(RecordingSegment.fileName(for: index))
+    }
+
+    /// セッションの開始を記録する（未登録なら manifest を作る）
+    func registerSessionStart(sessionId: String, startedAt: Date) {
+        guard !sessions.contains(where: { $0.id == sessionId }) else { return }
+        save(RecordingSession(id: sessionId, startedAt: startedAt))
+    }
+
+    /// セグメントの録画開始を manifest へ記録する
+    func registerSegmentStart(sessionId: String, index: Int, startedAt: Date) {
+        mutate(sessionId: sessionId, fallbackStartedAt: startedAt) { session in
+            guard !session.segments.contains(where: { $0.index == index }) else { return }
+            session.segments.append(RecordingSegment(
+                index: index,
+                fileName: RecordingSegment.fileName(for: index),
+                startedAt: startedAt
+            ))
         }
     }
 
-    /// 継続録画（中間データ）を削除する（セッション終了から猶予後のクリーンアップ用）
-    func deleteSource(sessionId: String) {
-        guard let dir = try? sourcesDirectory else { return }
-        try? fileManager.removeItem(at: dir.appendingPathComponent("\(sessionId).mov"))
-        try? fileManager.removeItem(at: dir.appendingPathComponent("\(sessionId).json"))
+    /// セグメントの録画終了を manifest へ記録する
+    func registerSegmentEnd(sessionId: String, index: Int, endedAt: Date, reason: SegmentEndReason) {
+        mutate(sessionId: sessionId, fallbackStartedAt: endedAt) { session in
+            guard let i = session.segments.firstIndex(where: { $0.index == index }) else { return }
+            session.segments[i].endedAt = endedAt
+            session.segments[i].endReason = reason
+        }
+    }
+
+    /// セッションの終了を manifest へ記録する
+    func registerSessionEnd(sessionId: String, endedAt: Date) {
+        mutate(sessionId: sessionId, fallbackStartedAt: endedAt) { $0.endedAt = endedAt }
+    }
+
+    /// セッション録画を削除する（ユーザー操作のみ。自動削除はしない。F-I7-4）
+    func deleteSession(sessionId: String) {
+        guard let dir = try? sourcesDirectory.appendingPathComponent(sessionId, isDirectory: true) else { return }
+        try? fileManager.removeItem(at: dir)
+        AppLog.clip.info("deleted session recording: \(sessionId, privacy: .public)")
         reloadSources()
+    }
+
+    private func mutate(
+        sessionId: String,
+        fallbackStartedAt: Date,
+        _ body: (inout RecordingSession) -> Void
+    ) {
+        var session = sessions.first(where: { $0.id == sessionId })
+            ?? RecordingSession(id: sessionId, startedAt: fallbackStartedAt)
+        body(&session)
+        save(session)
+    }
+
+    /// manifest を書き出して一覧へ反映する
+    ///
+    /// Why not まとめて保存: 中断やクラッシュでセグメントの記録が失われると、
+    /// その区間の映像が manifest から辿れなくなり、実体があるのに使えないファイルが残る。
+    /// 変更のたびに書き出す（1セッションあたり数十回程度で、量的な問題は無い）。
+    private func save(_ session: RecordingSession) {
+        do {
+            let url = try sessionDirectory(session.id).appendingPathComponent(Self.manifestName)
+            try Self.encoder.encode(session).write(to: url, options: .atomic)
+            if let i = sessions.firstIndex(where: { $0.id == session.id }) {
+                sessions[i] = session
+            } else {
+                sessions.append(session)
+            }
+        } catch {
+            AppLog.clip.error("manifest save failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     // MARK: - Public API (per-swing clips)
@@ -163,24 +261,26 @@ final class VideoStore: ObservableObject {
             skip(sessionId: sessionId, sequence: sequence, reason: .detectedAtMissing, detail: "detectedAt missing")
             return
         }
-        guard let source = sources.first(where: { $0.id == sessionId }) else {
+        guard let session = sessions.first(where: { $0.id == sessionId }) else {
             skip(sessionId: sessionId, sequence: sequence, reason: .noSourceRecording,
                  detail: "no source recording for session")
             return
         }
-        guard let sourceURL = try? sourcesDirectory.appendingPathComponent("\(source.id).mov"),
+        // 中断区間・録画範囲外・終了時刻未確定のいずれもここで弾かれる。
+        // 録画中のセグメントは範囲が定まらないため、確定後の reload で再試行される
+        guard let (segment, offset) = session.resolve(detectedAt) else {
+            skip(sessionId: sessionId, sequence: sequence, reason: .outOfRecordedRange,
+                 detail: "detectedAt not covered by any segment "
+                       + "(detectedAt=\(detectedAt) segments=\(session.segments.count))")
+            return
+        }
+        guard let sourceURL = try? sourcesDirectory
+                .appendingPathComponent(sessionId, isDirectory: true)
+                .appendingPathComponent(segment.fileName),
               fileManager.fileExists(atPath: sourceURL.path)
         else {
             skip(sessionId: sessionId, sequence: sequence, reason: .sourceFileMissing,
-                 detail: "source file missing on disk")
-            return
-        }
-        // 録画中（endedAt 未確定）は正しい範囲が定まらないため、確定後の reload で再試行される
-        guard let offset = source.offsetSeconds(for: detectedAt) else {
-            let ended = source.endedAt.map { "\($0)" } ?? "nil(recording)"
-            skip(sessionId: sessionId, sequence: sequence, reason: .outOfRecordedRange,
-                 detail: "detectedAt out of source range "
-                       + "(detectedAt=\(detectedAt) startedAt=\(source.startedAt) endedAt=\(ended))")
+                 detail: "segment file missing on disk (\(segment.fileName))")
             return
         }
 

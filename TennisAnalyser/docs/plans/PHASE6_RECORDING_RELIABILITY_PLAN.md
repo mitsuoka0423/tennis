@@ -138,7 +138,7 @@ W1・W2（録画継続・セグメント分割）は**変更なく必要**。動
     切り替えと削除は T6 で行う（AGENTS.md 方針1: 中断可能性）
   - 旧形式ファイルの起動時削除は T6 で実施する（切り替えと同時でなければ意味がないため）
 
-- [ ] **T6: `VideoStore` のセグメント対応（`PracticeVideo` の撤去を含む）**
+- [x] **T6: `VideoStore` のセグメント対応（`PracticeVideo` の撤去を含む）** ✅ 2026-07-25
   - `sources: [PracticeVideo]` を `RecordingSession` ベースへ置換し、`PracticeVideo` を削除
   - `saveSourceMetadata` を manifest.json の読み書きへ変更
   - 旧形式（`{sessionId}.mov` + `.json`）が残っていれば起動時に削除。移行処理は作らない

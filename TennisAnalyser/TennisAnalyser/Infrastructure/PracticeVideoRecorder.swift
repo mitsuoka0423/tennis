@@ -61,8 +61,8 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
     /// 停止要求の時点で理由を預かる。
     private var pendingEndReason: SegmentEndReason = .sessionEnded
 
-    /// セグメント番号。W2（F-I7-3）で分割録画に対応するまでは 1本のみのため 0 固定
-    private static let singleSegmentIndex = 0
+    /// 録画中のセグメント番号（F-I7-3）
+    private var currentSegmentIndex = 0
 
     init(videoStore: VideoStore, diagnostics: DiagnosticsStore) {
         self.videoStore = videoStore
@@ -171,11 +171,13 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
 
     func startRecording(sessionId: String) {
         guard !isRecording, permissionState == .granted else { return }
-        guard let url = try? videoStore.newSourceRecordingURL(sessionId: sessionId) else {
+        let index = videoStore.nextSegmentIndex(sessionId: sessionId)
+        guard let url = try? videoStore.newSegmentURL(sessionId: sessionId, index: index) else {
             errorMessage = "保存先を作成できませんでした。"
             return
         }
         pendingSessionId = sessionId
+        currentSegmentIndex = index
         setIdleTimerDisabled(true)
         // 録画開始時点の向きをファイルに固定する（三脚固定で先に向きを決めてから
         // Watch で計測開始する運用のため、開始時の角度を採用すれば十分）
@@ -241,9 +243,9 @@ extension PracticeVideoRecorder: AVCaptureFileOutputRecordingDelegate {
             self.isRecording = true
             AppLog.recording.info("segment started: \(fileURL.lastPathComponent, privacy: .public)")
             if let sessionId = self.pendingSessionId {
-                self.diagnostics.record(
-                    .segmentStarted(index: Self.singleSegmentIndex, at: startedAt), for: sessionId
-                )
+                let index = self.currentSegmentIndex
+                self.videoStore.registerSegmentStart(sessionId: sessionId, index: index, startedAt: startedAt)
+                self.diagnostics.record(.segmentStarted(index: index, at: startedAt), for: sessionId)
             }
         }
     }
@@ -264,6 +266,7 @@ extension PracticeVideoRecorder: AVCaptureFileOutputRecordingDelegate {
             self.pendingSessionId = nil
             self.recordingStartedAt = nil
             let reason = self.pendingEndReason
+            let index = self.currentSegmentIndex
             self.pendingEndReason = .sessionEnded
 
             if let error {
@@ -275,9 +278,11 @@ extension PracticeVideoRecorder: AVCaptureFileOutputRecordingDelegate {
                     AppLog.recording.error(
                         "segment failed: \(error.localizedDescription, privacy: .public)"
                     )
+                    self.videoStore.registerSegmentEnd(
+                        sessionId: sessionId, index: index, endedAt: endedAt, reason: .error
+                    )
                     self.diagnostics.record(
-                        .segmentEnded(index: Self.singleSegmentIndex, at: endedAt, reason: .error),
-                        for: sessionId
+                        .segmentEnded(index: index, at: endedAt, reason: .error), for: sessionId
                     )
                     self.errorMessage = "録画に失敗しました: \(error.localizedDescription)"
                     return
@@ -290,16 +295,12 @@ extension PracticeVideoRecorder: AVCaptureFileOutputRecordingDelegate {
                 duration=\(endedAt.timeIntervalSince(startedAt), format: .fixed(precision: 1))s
                 """
             )
+            self.videoStore.registerSegmentEnd(
+                sessionId: sessionId, index: index, endedAt: endedAt, reason: reason
+            )
             self.diagnostics.record(
-                .segmentEnded(index: Self.singleSegmentIndex, at: endedAt, reason: reason),
-                for: sessionId
+                .segmentEnded(index: index, at: endedAt, reason: reason), for: sessionId
             )
-
-            let video = PracticeVideo(
-                id: sessionId, startedAt: startedAt, endedAt: endedAt,
-                fileName: outputFileURL.lastPathComponent
-            )
-            self.videoStore.saveSourceMetadata(video)
         }
     }
 }

@@ -48,6 +48,7 @@ struct TennisAnalyserApp: App {
                 .environmentObject(videoStore)
                 .environmentObject(recorder)
                 .task {
+                    videoStore.removeLegacyLayout()
                     store.reload()
                     videoStore.reload()
                 }
