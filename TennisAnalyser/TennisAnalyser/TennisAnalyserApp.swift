@@ -14,11 +14,13 @@ struct TennisAnalyserApp: App {
     @StateObject private var videoStore: VideoStore
     @StateObject private var recorder: PracticeVideoRecorder
     private let sessionManager: PhoneSessionManager
+    private let diagnostics: DiagnosticsStore
 
     init() {
         // 診断記録は録画・クリップ生成・セッション通知の全経路から書かれるため、
         // 単一インスタンスを App 側で生成して配る（F-I7-5）
         let diagnostics = DiagnosticsStore()
+        self.diagnostics = diagnostics
         let store = SwingStore()
         let videoStore = VideoStore(diagnostics: diagnostics)
         let recorder = PracticeVideoRecorder(videoStore: videoStore, diagnostics: diagnostics)
@@ -43,7 +45,7 @@ struct TennisAnalyserApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootTabView()
+            RootTabView(diagnostics: diagnostics)
                 .environmentObject(store)
                 .environmentObject(videoStore)
                 .environmentObject(recorder)
@@ -58,12 +60,17 @@ struct TennisAnalyserApp: App {
 
 /// アプリのルートタブ（F-I6: スイング一覧 / 録画 の2タブ構成）
 private struct RootTabView: View {
+
+    let diagnostics: DiagnosticsStore
+
     var body: some View {
         TabView {
             ContentView()
                 .tabItem { Label("スイング", systemImage: "figure.tennis") }
             RecordingCameraView()
                 .tabItem { Label("録画", systemImage: "video") }
+            SessionDiagnosticsView(diagnostics: diagnostics)
+                .tabItem { Label("診断", systemImage: "waveform.path.ecg") }
         }
     }
 }
