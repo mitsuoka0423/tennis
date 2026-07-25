@@ -107,15 +107,16 @@ W1・W2（録画継続・セグメント分割）は**変更なく必要**。動
     `Task { @MainActor in }` 経由で `UIApplication` に触る
   - ビルド ✅（CLI）。⚠️ 実機での効果確認は T4 と合わせて実施する
 
-- [ ] **T4: 中断検知と自動復帰**
-  - `AVCaptureSessionWasInterrupted` / `AVCaptureSessionInterruptionEnded` を購読
-  - `UIApplication.didBecomeActiveNotification` を購読
-  - 「Watch セッションが継続中か」を示す論理状態 `isSessionActive` を導入し、
-    `isRecording`（物理状態）と分離する
-  - `isSessionActive == true` かつ `isRecording == false` になったら録画を再開
-  - `willResignActive` での停止は維持（ファイル破損防止）。停止と再開を対にする
-  - 中断の発生と復帰を T2 の診断記録へ記録
-  - **この時点で実機の短時間確認を行う**（ホーム画面へ移動→復帰で録画が再開するか）
+- [x] **T4: 中断検知と自動復帰** ✅ 2026-07-25
+  - 論理状態 `isSessionActive`（セッション継続中か）と物理状態 `isRecording` を分離
+  - `beginSession` / `endSession` を公開 API とし、`startNextSegment` を内部化
+  - 中断の入口: `willResignActive` / `AVCaptureSessionWasInterrupted`
+  - 復帰の契機: `didBecomeActive` / `AVCaptureSessionInterruptionEnded`
+  - 復帰判定は `resumeIfNeeded` に集約。「論理が有効かつ物理が停止」だけで判断するため、
+    どの経路から呼ばれても結果が同じで二重開始も起きない
+  - 中断中は `AVCaptureSession` 自体も停止するため、再開前に `startRunning()` し直す
+  - 中断・復帰を診断記録へ配線（T2 で型のみ用意していた分）
+  - ⚠️ **実機での中断→復帰確認は未実施**。W2 完了後に必ず行うこと
 
 ### W2: セグメント分割録画
 
@@ -149,15 +150,18 @@ W1・W2（録画継続・セグメント分割）は**変更なく必要**。動
   - 既存の `videoComposition(withPropertiesOf:)` による向き保持は維持する
     （F-I6 で解決済みのため壊さないこと）
 
-- [ ] **T7: 最大セグメント長**
-  - `AVCaptureMovieFileOutput.maxRecordedDuration` を 10分に設定
-  - 到達時の `didFinishRecordingTo` で即座に次セグメントを開始
-  - 継ぎ目のギャップは既知の制約として診断記録に残す
+- [x] **T7: 最大セグメント長** ✅ 2026-07-25
+  - `maxRecordedDuration` を 10分に設定
+  - 到達時は `AVError.maximumDurationReached` で通知されるため、失敗ではなく
+    正常終了（`.maxDuration`）として扱い、間を空けずに次セグメントを開始する
+  - 継ぎ目の欠落は診断記録の `segmentEnded` / `segmentStarted` の時刻差として残る
 
 ### W3: 中間データ削除の安全化
 
-- [ ] **T8: セグメントを保持する（2026-07-25 の方針変更で要求が反転）**
+- [x] **T8: セグメントを保持する** ✅ 2026-07-25（T6 で実施）
   - `scheduleSourceCleanup` の無条件削除を**廃止し、自動削除そのものを行わない**
+  - 猶予後の処理は未生成クリップの再試行のみに変更（`scheduleRemainingClips`）
+  - 削除 API は `deleteSession` としてユーザー操作用にのみ残した
   - 削除はユーザーの明示的な操作に限る（仕様書 F-I7-4）
   - ~~保持上限7日~~ は撤回。ラベル付けは練習後にまとめて行うため、
     期限での自動削除は学習データの素材ごと失うことになる

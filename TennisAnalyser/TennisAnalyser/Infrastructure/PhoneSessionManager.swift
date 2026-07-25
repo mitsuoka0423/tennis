@@ -95,12 +95,12 @@ extension PhoneSessionManager: WCSessionDelegate {
                 let startedAt = Date()
                 self.diagnostics.record(.sessionStarted(at: startedAt), for: sessionId)
                 self.videoStore.registerSessionStart(sessionId: sessionId, startedAt: startedAt)
-                self.recorder.startRecording(sessionId: sessionId)
+                self.recorder.beginSession(sessionId: sessionId)
             case "ended":
                 AppLog.session.info("session ended: \(sessionId, privacy: .public)")
                 let endedAt = Date()
                 self.diagnostics.record(.sessionEnded(at: endedAt), for: sessionId)
-                self.recorder.stopRecording()
+                self.recorder.endSession()
                 self.videoStore.registerSessionEnd(sessionId: sessionId, endedAt: endedAt)
                 self.scheduleRemainingClips(sessionId: sessionId)
             default:

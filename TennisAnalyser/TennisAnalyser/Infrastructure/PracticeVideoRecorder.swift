@@ -32,7 +32,15 @@ enum CameraPermissionState {
 @MainActor
 final class PracticeVideoRecorder: NSObject, ObservableObject {
 
+    /// 物理状態: いま実際に録画しているか
     @Published private(set) var isRecording = false
+
+    /// 論理状態: Watch のセッションが継続中か（F-I7-2）
+    ///
+    /// Why not isRecording だけで判断: 中断中は「録画していない」が「セッションは続いている」。
+    /// この2つを同一視していたため、2026-07-21 は中断後に再開すべきかどうかを
+    /// 判断する材料が無く、57分間停止したままになった。
+    @Published private(set) var isSessionActive = false
     @Published private(set) var permissionState: CameraPermissionState = .notDetermined
     @Published private(set) var errorMessage: String?
 
@@ -55,6 +63,14 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
     private let diagnostics: DiagnosticsStore
     private var pendingSessionId: String?
     private var recordingStartedAt: Date?
+    /// セッションが継続中の間だけ保持する sessionId（中断復帰時の再開先）
+    private var activeSessionId: String?
+
+    /// 1セグメントの最大長（F-I7-3）。到達したら次のセグメントへ切り替える
+    ///
+    /// Why not 無制限: 1時間の 1080p は 5〜7GB に達し、1ファイルの破損が全損に直結する。
+    /// セグメントは一次データであり、失うと1時間の実練習をやり直すことになる。
+    private static let maxSegmentDuration = CMTime(seconds: 600, preferredTimescale: 600)
 
     /// 停止を要求した側が設定する終了理由。`didFinishRecordingTo` は
     /// 停止が「セッション終了によるもの」か「中断によるもの」かを判別できないため、
@@ -68,9 +84,24 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
         self.videoStore = videoStore
         self.diagnostics = diagnostics
         super.init()
-        NotificationCenter.default.addObserver(
+        let center = NotificationCenter.default
+        center.addObserver(
             self, selector: #selector(handleWillResignActive),
             name: UIApplication.willResignActiveNotification, object: nil
+        )
+        // 中断からの復帰経路（F-I7-2）。中断の入口は複数あるため、
+        // 復帰契機も「アプリが前面に戻った」「キャプチャの中断が明けた」の両方を購読する
+        center.addObserver(
+            self, selector: #selector(handleDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification, object: nil
+        )
+        center.addObserver(
+            self, selector: #selector(handleSessionWasInterrupted(_:)),
+            name: .AVCaptureSessionWasInterrupted, object: session
+        )
+        center.addObserver(
+            self, selector: #selector(handleSessionInterruptionEnded),
+            name: .AVCaptureSessionInterruptionEnded, object: session
         )
     }
 
@@ -122,6 +153,7 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
                 return
             }
             self.session.addOutput(self.movieOutput)
+            self.movieOutput.maxRecordedDuration = Self.maxSegmentDuration
             self.session.commitConfiguration()
             self.session.startRunning()
 
@@ -169,7 +201,26 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
 
     // MARK: - Recording（Watch からのセッション通知で呼ばれる。F-I6）
 
-    func startRecording(sessionId: String) {
+    /// Watch のセッション開始通知を受けて録画を始める（F-I7-2）
+    func beginSession(sessionId: String) {
+        isSessionActive = true
+        activeSessionId = sessionId
+        startNextSegment()
+    }
+
+    /// Watch のセッション終了通知を受けて録画を終える
+    func endSession() {
+        isSessionActive = false
+        activeSessionId = nil
+        stopRecording(reason: .sessionEnded)
+    }
+
+    /// 次のセグメントの録画を開始する
+    ///
+    /// 中断復帰・最大長到達・セッション開始のいずれからも呼ばれる。
+    /// `.mov` へ追記する API が無いため、再開は常に新しいセグメントになる。
+    private func startNextSegment() {
+        guard let sessionId = activeSessionId else { return }
         guard !isRecording, permissionState == .granted else { return }
         let index = videoStore.nextSegmentIndex(sessionId: sessionId)
         guard let url = try? videoStore.newSegmentURL(sessionId: sessionId, index: index) else {
@@ -200,8 +251,52 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - 中断と復帰（F-I7-2）
+
     @objc private func handleWillResignActive() {
+        // Why not 停止しない: バックグラウンドでは AVCaptureSession が OS により
+        // 必ず停止される。停止を待つと書き込み途中のファイルが壊れるため、先に閉じる。
+        guard isRecording else { return }
+        recordInterruption("willResignActive")
+        stopRecording(reason: .interrupted)
+    }
+
+    @objc private func handleDidBecomeActive() {
+        resumeIfNeeded(trigger: "didBecomeActive")
+    }
+
+    @objc private func handleSessionWasInterrupted(_ note: Notification) {
+        let reason = (note.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int).map(String.init) ?? "unknown"
+        recordInterruption("captureInterrupted(reason=\(reason))")
         if isRecording { stopRecording(reason: .interrupted) }
+    }
+
+    @objc private func handleSessionInterruptionEnded() {
+        resumeIfNeeded(trigger: "captureInterruptionEnded")
+    }
+
+    /// セッションが継続中なのに録画が止まっていれば再開する
+    ///
+    /// 中断の入口が複数ある一方、復帰契機も複数あるため、
+    /// 「論理状態が有効かつ物理状態が停止」という条件だけで判断する。
+    /// どの経路から呼ばれても同じ結果になり、二重に開始することもない。
+    private func resumeIfNeeded(trigger: String) {
+        guard isSessionActive, !isRecording, activeSessionId != nil else { return }
+        AppLog.recording.info("resuming after interruption: trigger=\(trigger, privacy: .public)")
+        if let sessionId = activeSessionId {
+            diagnostics.record(.interruptionEnded(at: Date()), for: sessionId)
+        }
+        // 中断中は AVCaptureSession 自体も停止しているため、走らせ直してから録画する
+        sessionQueue.async { [session] in
+            if !session.isRunning { session.startRunning() }
+        }
+        startNextSegment()
+    }
+
+    private func recordInterruption(_ reason: String) {
+        guard let sessionId = activeSessionId else { return }
+        AppLog.recording.info("interrupted: \(reason, privacy: .public)")
+        diagnostics.record(.interrupted(at: Date(), reason: reason), for: sessionId)
     }
 
     // MARK: - 自動ロックの抑止（F-I7-T3）
@@ -265,16 +360,22 @@ extension PracticeVideoRecorder: AVCaptureFileOutputRecordingDelegate {
             guard let sessionId = self.pendingSessionId, let startedAt = self.recordingStartedAt else { return }
             self.pendingSessionId = nil
             self.recordingStartedAt = nil
-            let reason = self.pendingEndReason
+            var reason = self.pendingEndReason
             let index = self.currentSegmentIndex
+            var reachedMaxDuration = false
             self.pendingEndReason = .sessionEnded
 
             if let error {
                 // AVFoundation は正常停止時にも「非ゼロ」エラーを返すことがあるため、
                 // ファイルが実際に存在するかで成否を判断する
-                let recordedSuccessfully = (error as NSError)
+                let nsError = error as NSError
+                let recordedSuccessfully = nsError
                     .userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool ?? false
-                if !recordedSuccessfully {
+                // 最大長到達は正常終了として扱う。ファイルは有効であり、次のセグメントへ継ぐ
+                if nsError.code == AVError.maximumDurationReached.rawValue {
+                    reachedMaxDuration = true
+                }
+                if !recordedSuccessfully && !reachedMaxDuration {
                     AppLog.recording.error(
                         "segment failed: \(error.localizedDescription, privacy: .public)"
                     )
@@ -295,12 +396,21 @@ extension PracticeVideoRecorder: AVCaptureFileOutputRecordingDelegate {
                 duration=\(endedAt.timeIntervalSince(startedAt), format: .fixed(precision: 1))s
                 """
             )
+            if reachedMaxDuration { reason = .maxDuration }
+
             self.videoStore.registerSegmentEnd(
                 sessionId: sessionId, index: index, endedAt: endedAt, reason: reason
             )
             self.diagnostics.record(
                 .segmentEnded(index: index, at: endedAt, reason: reason), for: sessionId
             )
+
+            // 最大長で切れた場合は、間を空けずに次のセグメントを開始する（F-I7-3）。
+            // 継ぎ目の欠落は避けられないが、診断記録の segmentEnded/segmentStarted の
+            // 時刻差として残るため、後から欠落区間を特定できる
+            if reachedMaxDuration, self.isSessionActive {
+                self.startNextSegment()
+            }
         }
     }
 }
