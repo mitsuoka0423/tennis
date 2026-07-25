@@ -78,10 +78,12 @@
 
 ### W1: 録画継続
 
-- [ ] **T3: 自動ロックの抑止**
-  - `PracticeVideoRecorder` の録画開始で `UIApplication.shared.isIdleTimerDisabled = true`
-  - 録画停止・セッション終了・`deinit` で必ず `false` へ戻す
-  - Why not コメント: 常時 true にしない理由（バッテリー）を記載
+- [x] **T3: 自動ロックの抑止** ✅ 2026-07-25
+  - `startRecording` で `isIdleTimerDisabled = true`、`didFinishRecordingTo` で `false`
+  - 戻す処理は `guard` より前に置いた。以降の早期 return でも抑止が残らないようにするため
+  - `deinit` でも戻す。ただし `deinit` は nonisolated で @MainActor メソッドを呼べないため
+    `Task { @MainActor in }` 経由で `UIApplication` に触る
+  - ビルド ✅（CLI）。⚠️ 実機での効果確認は T4 と合わせて実施する
 
 - [ ] **T4: 中断検知と自動復帰**
   - `AVCaptureSessionWasInterrupted` / `AVCaptureSessionInterruptionEnded` を購読

@@ -176,6 +176,7 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
             return
         }
         pendingSessionId = sessionId
+        setIdleTimerDisabled(true)
         // 録画開始時点の向きをファイルに固定する（三脚固定で先に向きを決めてから
         // Watch で計測開始する運用のため、開始時の角度を採用すれば十分）
         let captureAngle = rotationCoordinator?.videoRotationAngleForHorizonLevelCapture
@@ -201,8 +202,26 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
         if isRecording { stopRecording(reason: .interrupted) }
     }
 
+    // MARK: - 自動ロックの抑止（F-I7-T3）
+
+    /// 画面の自動ロックを抑止する
+    ///
+    /// 2026-07-21 の実機検証では、三脚固定で操作しないため自動ロックが発火し、
+    /// `willResignActive` 経由で録画が停止していた。録画中だけ抑止する。
+    ///
+    /// Why not 常時抑止: 画面が点きっぱなしになりバッテリーを消費する。
+    /// 録画していない間まで抑止する理由が無い。
+    private func setIdleTimerDisabled(_ disabled: Bool) {
+        guard UIApplication.shared.isIdleTimerDisabled != disabled else { return }
+        UIApplication.shared.isIdleTimerDisabled = disabled
+        AppLog.recording.info("idle timer disabled: \(disabled, privacy: .public)")
+    }
+
     deinit {
         NotificationCenter.default.removeObserver(self)
+        // Why not setIdleTimerDisabled(false): deinit は nonisolated であり
+        // @MainActor のメソッドを呼べない。UIApplication へは MainActor 上で触る必要がある。
+        Task { @MainActor in UIApplication.shared.isIdleTimerDisabled = false }
     }
 }
 
@@ -238,6 +257,9 @@ extension PracticeVideoRecorder: AVCaptureFileOutputRecordingDelegate {
         let endedAt = Date()
         Task { @MainActor in
             self.isRecording = false
+            // 録画していない間まで画面を点けておく理由が無いため、確実に戻す。
+            // guard の前に置くのは、以降の早期 return でも抑止が残らないようにするため
+            self.setIdleTimerDisabled(false)
             guard let sessionId = self.pendingSessionId, let startedAt = self.recordingStartedAt else { return }
             self.pendingSessionId = nil
             self.recordingStartedAt = nil
