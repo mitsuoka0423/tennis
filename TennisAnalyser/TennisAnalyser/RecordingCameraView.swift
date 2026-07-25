@@ -15,6 +15,8 @@ struct RecordingCameraView: View {
     @EnvironmentObject private var recorder: PracticeVideoRecorder
     @State private var elapsedSeconds = 0
     @State private var timerTask: Task<Void, Never>?
+    /// 空き容量（W6-T17）。nil = 未取得
+    @State private var capacity: StorageCapacity?
 
     var body: some View {
         ZStack {
@@ -29,7 +31,10 @@ struct RecordingCameraView: View {
                 ProgressView().tint(.white)
             }
         }
-        .onAppear { recorder.prepare() }
+        .onAppear {
+            recorder.prepare()
+            capacity = StorageCapacity.current()
+        }
         .onChange(of: recorder.isRecording) { _, isRecording in
             if isRecording { startTimer() } else { stopTimer() }
         }
@@ -47,12 +52,36 @@ struct RecordingCameraView: View {
             CameraPreviewView(recorder: recorder)
                 .ignoresSafeArea()
 
-            VStack {
+            VStack(spacing: 8) {
                 statusBadge
                     .padding(.top, 12)
+                if let capacity, capacity.isLow {
+                    capacityWarning(capacity)
+                }
                 Spacer()
             }
         }
+    }
+
+    /// 空き容量の警告（W6-T17）
+    ///
+    /// 削除の提案はしない。中間データは学習データの素材であり、自動削除も
+    /// 期限削除も行わない方針のため（F-I7-4）。判断はユーザーに委ねる。
+    private func capacityWarning(_ capacity: StorageCapacity) -> some View {
+        VStack(spacing: 2) {
+            Label(
+                "空き容量 \(capacity.availableDescription)",
+                systemImage: "exclamationmark.triangle.fill"
+            )
+            .font(.subheadline.weight(.semibold))
+            Text(String(format: "録画できる見込みは約 %.1f 時間です", capacity.estimatedRecordableHours))
+                .font(.caption)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.orange.opacity(0.85))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     /// 自動録画の状態表示（手動ボタンは無い。Watch の計測開始/停止に連動する）

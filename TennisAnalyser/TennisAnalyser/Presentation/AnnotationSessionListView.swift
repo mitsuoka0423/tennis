@@ -34,6 +34,11 @@ struct AnnotationSessionListView: View {
                             } label: {
                                 Label("タイムライン", systemImage: "waveform.path")
                             }
+                            NavigationLink {
+                                AnnotationExportView(session: session)
+                            } label: {
+                                Label("書き出し", systemImage: "square.and.arrow.up")
+                            }
                         } header: {
                             sessionHeader(session)
                         }
