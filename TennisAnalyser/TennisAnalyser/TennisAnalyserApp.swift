@@ -16,9 +16,12 @@ struct TennisAnalyserApp: App {
     private let sessionManager: PhoneSessionManager
 
     init() {
+        // 診断記録は録画・クリップ生成・セッション通知の全経路から書かれるため、
+        // 単一インスタンスを App 側で生成して配る（F-I7-5）
+        let diagnostics = DiagnosticsStore()
         let store = SwingStore()
-        let videoStore = VideoStore()
-        let recorder = PracticeVideoRecorder(videoStore: videoStore)
+        let videoStore = VideoStore(diagnostics: diagnostics)
+        let recorder = PracticeVideoRecorder(videoStore: videoStore, diagnostics: diagnostics)
         _store = StateObject(wrappedValue: store)
         _videoStore = StateObject(wrappedValue: videoStore)
         // recorder は videoStore と同一インスタンスを共有する必要があるため App 側で生成する
@@ -32,7 +35,9 @@ struct TennisAnalyserApp: App {
             ) }
         }
 
-        sessionManager = PhoneSessionManager(store: store, videoStore: videoStore, recorder: recorder)
+        sessionManager = PhoneSessionManager(
+            store: store, videoStore: videoStore, recorder: recorder, diagnostics: diagnostics
+        )
         sessionManager.activate()
     }
 

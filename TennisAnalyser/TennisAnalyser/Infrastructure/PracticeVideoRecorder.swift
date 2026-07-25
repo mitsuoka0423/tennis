@@ -16,6 +16,7 @@
 import AVFoundation
 import Combine
 import UIKit
+import os
 
 /// カメラ権限の状態
 enum CameraPermissionState {
@@ -51,11 +52,21 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
     private var previewRotationObservation: NSKeyValueObservation?
 
     private let videoStore: VideoStore
+    private let diagnostics: DiagnosticsStore
     private var pendingSessionId: String?
     private var recordingStartedAt: Date?
 
-    init(videoStore: VideoStore) {
+    /// 停止を要求した側が設定する終了理由。`didFinishRecordingTo` は
+    /// 停止が「セッション終了によるもの」か「中断によるもの」かを判別できないため、
+    /// 停止要求の時点で理由を預かる。
+    private var pendingEndReason: SegmentEndReason = .sessionEnded
+
+    /// セグメント番号。W2（F-I7-3）で分割録画に対応するまでは 1本のみのため 0 固定
+    private static let singleSegmentIndex = 0
+
+    init(videoStore: VideoStore, diagnostics: DiagnosticsStore) {
         self.videoStore = videoStore
+        self.diagnostics = diagnostics
         super.init()
         NotificationCenter.default.addObserver(
             self, selector: #selector(handleWillResignActive),
@@ -178,15 +189,16 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
         }
     }
 
-    func stopRecording() {
+    func stopRecording(reason: SegmentEndReason = .sessionEnded) {
         guard isRecording else { return }
+        pendingEndReason = reason
         sessionQueue.async { [movieOutput] in
             movieOutput.stopRecording()
         }
     }
 
     @objc private func handleWillResignActive() {
-        if isRecording { stopRecording() }
+        if isRecording { stopRecording(reason: .interrupted) }
     }
 
     deinit {
@@ -208,6 +220,12 @@ extension PracticeVideoRecorder: AVCaptureFileOutputRecordingDelegate {
         Task { @MainActor in
             self.recordingStartedAt = startedAt
             self.isRecording = true
+            AppLog.recording.info("segment started: \(fileURL.lastPathComponent, privacy: .public)")
+            if let sessionId = self.pendingSessionId {
+                self.diagnostics.record(
+                    .segmentStarted(index: Self.singleSegmentIndex, at: startedAt), for: sessionId
+                )
+            }
         }
     }
 
@@ -223,6 +241,8 @@ extension PracticeVideoRecorder: AVCaptureFileOutputRecordingDelegate {
             guard let sessionId = self.pendingSessionId, let startedAt = self.recordingStartedAt else { return }
             self.pendingSessionId = nil
             self.recordingStartedAt = nil
+            let reason = self.pendingEndReason
+            self.pendingEndReason = .sessionEnded
 
             if let error {
                 // AVFoundation は正常停止時にも「非ゼロ」エラーを返すことがあるため、
@@ -230,10 +250,28 @@ extension PracticeVideoRecorder: AVCaptureFileOutputRecordingDelegate {
                 let recordedSuccessfully = (error as NSError)
                     .userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool ?? false
                 if !recordedSuccessfully {
+                    AppLog.recording.error(
+                        "segment failed: \(error.localizedDescription, privacy: .public)"
+                    )
+                    self.diagnostics.record(
+                        .segmentEnded(index: Self.singleSegmentIndex, at: endedAt, reason: .error),
+                        for: sessionId
+                    )
                     self.errorMessage = "録画に失敗しました: \(error.localizedDescription)"
                     return
                 }
             }
+
+            AppLog.recording.info(
+                """
+                segment ended: reason=\(reason.rawValue, privacy: .public) \
+                duration=\(endedAt.timeIntervalSince(startedAt), format: .fixed(precision: 1))s
+                """
+            )
+            self.diagnostics.record(
+                .segmentEnded(index: Self.singleSegmentIndex, at: endedAt, reason: reason),
+                for: sessionId
+            )
 
             let video = PracticeVideo(
                 id: sessionId, startedAt: startedAt, endedAt: endedAt,

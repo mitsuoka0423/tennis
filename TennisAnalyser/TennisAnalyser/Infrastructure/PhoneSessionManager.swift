@@ -19,16 +19,23 @@ final class PhoneSessionManager: NSObject {
     private let store: SwingStore
     private let videoStore: VideoStore
     private let recorder: PracticeVideoRecorder
+    private let diagnostics: DiagnosticsStore
 
     /// セッション終了通知からこの秒数だけ待ってから継続録画（中間データ）を削除する。
     /// Watch→iPhone のスイング転送は F-W5 で「10秒以内」を目安としているため、
     /// 遅延到着分の処理猶予として十分な余裕を持たせる。
     private static let sourceCleanupDelaySeconds: UInt64 = 60
 
-    init(store: SwingStore, videoStore: VideoStore, recorder: PracticeVideoRecorder) {
+    init(
+        store: SwingStore,
+        videoStore: VideoStore,
+        recorder: PracticeVideoRecorder,
+        diagnostics: DiagnosticsStore
+    ) {
         self.store = store
         self.videoStore = videoStore
         self.recorder = recorder
+        self.diagnostics = diagnostics
         super.init()
     }
 
@@ -85,9 +92,11 @@ extension PhoneSessionManager: WCSessionDelegate {
             switch status {
             case "started":
                 AppLog.session.info("session started: \(sessionId, privacy: .public)")
+                self.diagnostics.record(.sessionStarted(at: Date()), for: sessionId)
                 self.recorder.startRecording(sessionId: sessionId)
             case "ended":
                 AppLog.session.info("session ended: \(sessionId, privacy: .public)")
+                self.diagnostics.record(.sessionEnded(at: Date()), for: sessionId)
                 self.recorder.stopRecording()
                 self.scheduleSourceCleanup(sessionId: sessionId)
             default:

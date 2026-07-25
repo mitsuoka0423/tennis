@@ -31,10 +31,15 @@ final class VideoStore: ObservableObject {
     private(set) var sources: [PracticeVideo] = []
 
     private let fileManager = FileManager.default
+    private let diagnostics: DiagnosticsStore
 
     /// クリップの前後窓（秒）。`VideoSyncPlayerView` の相対時間計算と一致させること。
     static let preRollSeconds = 2.0
     static let postRollSeconds = 2.0
+
+    init(diagnostics: DiagnosticsStore) {
+        self.diagnostics = diagnostics
+    }
 
     private var sourcesDirectory: URL {
         get throws { try makeDirectory("video_sources") }
@@ -155,29 +160,27 @@ final class VideoStore: ObservableObject {
         let key = "\(sessionId)/\(sequence)"
         guard !hasClip(sessionId: sessionId, sequence: sequence) else { return }
         guard let detectedAt else {
-            AppLog.clip.error("skip \(key, privacy: .public): detectedAt missing")
+            skip(sessionId: sessionId, sequence: sequence, reason: .detectedAtMissing, detail: "detectedAt missing")
             return
         }
         guard let source = sources.first(where: { $0.id == sessionId }) else {
-            AppLog.clip.error("skip \(key, privacy: .public): no source recording for session")
+            skip(sessionId: sessionId, sequence: sequence, reason: .noSourceRecording,
+                 detail: "no source recording for session")
             return
         }
         guard let sourceURL = try? sourcesDirectory.appendingPathComponent("\(source.id).mov"),
               fileManager.fileExists(atPath: sourceURL.path)
         else {
-            AppLog.clip.error("skip \(key, privacy: .public): source file missing on disk")
+            skip(sessionId: sessionId, sequence: sequence, reason: .sourceFileMissing,
+                 detail: "source file missing on disk")
             return
         }
         // 録画中（endedAt 未確定）は正しい範囲が定まらないため、確定後の reload で再試行される
         guard let offset = source.offsetSeconds(for: detectedAt) else {
             let ended = source.endedAt.map { "\($0)" } ?? "nil(recording)"
-            AppLog.clip.error(
-                """
-                skip \(key, privacy: .public): detectedAt out of source range \
-                (detectedAt=\(detectedAt, privacy: .public) \
-                startedAt=\(source.startedAt, privacy: .public) endedAt=\(ended, privacy: .public))
-                """
-            )
+            skip(sessionId: sessionId, sequence: sequence, reason: .outOfRecordedRange,
+                 detail: "detectedAt out of source range "
+                       + "(detectedAt=\(detectedAt) startedAt=\(source.startedAt) endedAt=\(ended))")
             return
         }
 
@@ -193,9 +196,20 @@ final class VideoStore: ObservableObject {
             try await exportClip(from: sourceURL, to: destURL, startSeconds: startSeconds, endSeconds: endSeconds)
             reloadClipKeys()
             AppLog.clip.info("extracted \(key, privacy: .public) at offset \(offset, format: .fixed(precision: 2))s")
+            diagnostics.record(.clipExtracted(sequence: sequence, at: Date()), for: sessionId)
         } catch {
-            AppLog.clip.error("extract failed \(key, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            skip(sessionId: sessionId, sequence: sequence, reason: .extractionFailed,
+                 detail: "extraction failed: \(error.localizedDescription)")
         }
+    }
+
+    /// クリップを生成できなかったことをログと診断記録の両方へ残す
+    ///
+    /// 片方だけに残すと、実機ログが取れない状況（Console.app 未接続）と
+    /// App から診断を見られない状況のどちらかで手掛かりを失うため、必ず対で記録する。
+    private func skip(sessionId: String, sequence: Int, reason: ClipSkipReason, detail: String) {
+        AppLog.clip.error("skip \(sessionId, privacy: .public)/\(sequence, privacy: .public): \(detail, privacy: .public)")
+        diagnostics.record(.clipSkipped(sequence: sequence, at: Date(), reason: reason), for: sessionId)
     }
 
     private func exportClip(from sourceURL: URL, to destURL: URL, startSeconds: Double, endSeconds: Double) async throws {

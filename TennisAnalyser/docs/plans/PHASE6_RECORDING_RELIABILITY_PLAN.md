@@ -58,11 +58,23 @@
   > Why not 共有ファイル1つ: 同期グループ構成のためターゲットごとにフォルダが対応する。
   > 共有には project.pbxproj の手編集が必要でリスクが見合わないため、各ターゲットに配置した。
 
-- [ ] **T2: 診断記録の器を作る**
-  - `SessionDiagnostics`（Domain）: セグメント・中断・クリップ生成の集計を保持
-  - `Documents/diagnostics/{sessionId}.json` に逐次追記保存
-  - この時点では記録するだけでよい（UI は W4）
-  - テスト: 集計ロジックのユニットテスト（What を記述）
+- [x] **T2: 診断記録の器を作る** ✅ 2026-07-25
+  - `DiagnosticEvent`（Domain）: 出来事1件。追記のみで記録する
+  - `SessionDiagnostics`（Domain）: 出来事の列から集計を**導出**する純粋関数
+  - `DiagnosticsStore`（Infrastructure）: `Documents/diagnostics/{sessionId}.jsonl` へ追記
+  - 配線済み: セッション開始/終了（`PhoneSessionManager`）、
+    セグメント開始/終了と終了理由（`PracticeVideoRecorder`）、
+    クリップ生成の成否と理由（`VideoStore`）
+  - 中断イベント（`.interrupted` / `.interruptionEnded`）は型のみ用意。記録は T4 で配線する
+  - テスト: 集計ロジック 8件 ✅（2026-07-21 の実機不具合を再現する回帰テストを含む）
+  - ビルド ✅ / テスト ✅（CLI）。⚠️ Xcode GUI ビルドは未確認（Xcode MCP 切断中）
+
+  > Why not `.json` で配列を保持: 配列を保つには読み込み→追加→全体書き戻しが必要で、
+  > 書き戻し中に落ちるとそれまでの記録ごと失われる。診断が最も必要なのは異常終了時であり、
+  > その状況で失われる方式は採れない。1行1イベントの JSON Lines に変更した（計画時は `.json`）。
+
+  > Why not 集計値を直接保存: 上書き保存では最後の書き込みしか残らない。
+  > 出来事を追記し集計は読み出し時に導出すれば、途中で落ちてもそこまでの経過が残る。
 
 ### W1: 録画継続
 

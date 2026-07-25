@@ -142,7 +142,8 @@ private struct CameraPreviewView: UIViewRepresentable {
 }
 
 #Preview {
-    let videoStore = VideoStore()
+    let diagnostics = DiagnosticsStore()
+    let videoStore = VideoStore(diagnostics: diagnostics)
     RecordingCameraView()
-        .environmentObject(PracticeVideoRecorder(videoStore: videoStore))
+        .environmentObject(PracticeVideoRecorder(videoStore: videoStore, diagnostics: diagnostics))
 }
