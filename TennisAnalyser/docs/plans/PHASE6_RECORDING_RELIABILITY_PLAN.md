@@ -127,13 +127,22 @@ W1・W2（録画継続・セグメント分割）は**変更なく必要**。動
 > 表現できない。T4 の復帰機構と T7 のセグメント回転は同一の機構であり、
 > 器（T5）を先に作らなければ T4 は正しく実装できない。
 
-- [ ] **T5: データモデルの刷新**
-  - `PracticeVideo` を `RecordingSession` + `RecordingSegment` へ置換（仕様書 4章）
-  - `Documents/video_sources/{sessionId}/manifest.json` + `{index}.mov`
-  - 旧形式ファイルが残っていれば起動時に削除（移行処理は作らない。実データ無しのため）
-  - テスト: `detectedAt` からセグメントとオフセットを解決するロジック
+- [x] **T5: データモデルの刷新** ✅ 2026-07-25（型と解決ロジックのみ。切り替えは T6）
+  - `RecordingSession` + `RecordingSegment` を新設（仕様書 4章）
+  - `resolve(_:)` が `detectedAt` からセグメントと内部オフセットを返す。
+    中断区間・録画範囲外・終了時刻未確定のセグメントはいずれも nil
+  - `nextSegmentIndex` は件数ではなく既存の最大値+1。途中のセグメントを削除しても
+    番号が衝突しないようにするため
+  - テスト14件 ✅（解決・番号採番・集計・JSON往復）
+  - **`PracticeVideo` は残置**。同時に置換するとビルドが通らない期間が生じるため、
+    切り替えと削除は T6 で行う（AGENTS.md 方針1: 中断可能性）
+  - 旧形式ファイルの起動時削除は T6 で実施する（切り替えと同時でなければ意味がないため）
 
-- [ ] **T6: `VideoStore` のセグメント対応**
+- [ ] **T6: `VideoStore` のセグメント対応（`PracticeVideo` の撤去を含む）**
+  - `sources: [PracticeVideo]` を `RecordingSession` ベースへ置換し、`PracticeVideo` を削除
+  - `saveSourceMetadata` を manifest.json の読み書きへ変更
+  - 旧形式（`{sessionId}.mov` + `.json`）が残っていれば起動時に削除。移行処理は作らない
+  - `PracticeVideoTests` は `RecordingSessionTests` に置き換わるため削除
   - `extractClipIfNeeded` を「`detectedAt` を含むセグメントを検索 → 該当セグメント内の
     オフセットで切り出し」に変更
   - セグメント境界に落ちたスイングは生成不可として診断記録へ記録
