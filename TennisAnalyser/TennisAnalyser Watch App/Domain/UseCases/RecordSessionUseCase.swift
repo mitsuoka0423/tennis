@@ -15,6 +15,7 @@ import os
 /// - MotionSensorRepository のサンプルを SwingDetector に流し、スイングを切り出す（F-W3）
 /// - 確定したスイングを SwingRepository へ逐次保存する（F-W4）
 /// - 保存完了を `onSwingSaved` で通知する（F-W5 転送のフック）
+/// - 届いたサンプルを全区間 `ContinuousSensorRepository` へ保存する（W6-T14）
 @MainActor
 final class RecordSessionUseCase: ObservableObject {
 
@@ -22,6 +23,7 @@ final class RecordSessionUseCase: ObservableObject {
 
     private let motionRepo: any MotionSensorRepository
     private let swingRepo: any SwingRepository
+    private let continuousRepo: (any ContinuousSensorRepository)?
 
     // MARK: - State
 
@@ -75,9 +77,15 @@ final class RecordSessionUseCase: ObservableObject {
 
     // MARK: - Init
 
-    init(motionRepo: any MotionSensorRepository, swingRepo: any SwingRepository) {
+    /// - Parameter continuousRepo: 全区間記録の保存先。nil の場合はスイング単位保存のみ行う
+    init(
+        motionRepo: any MotionSensorRepository,
+        swingRepo: any SwingRepository,
+        continuousRepo: (any ContinuousSensorRepository)? = nil
+    ) {
         self.motionRepo = motionRepo
         self.swingRepo = swingRepo
+        self.continuousRepo = continuousRepo
     }
 
     // MARK: - Public API
@@ -94,6 +102,7 @@ final class RecordSessionUseCase: ObservableObject {
             postSeconds: postSeconds,
             threshold: accelerationThreshold
         )
+        continuousRepo?.beginSession(sessionId: sessionId)
         isRecording = true
         swingCount = 0
         sampleCount = 0
@@ -124,11 +133,13 @@ final class RecordSessionUseCase: ObservableObject {
     ///
     /// スイングは検知のたびに保存済みのため、停止時の一括保存は行わない。
     /// 収集途中の未確定ウィンドウは破棄する（インパクト後2秒未満で停止した場合のみ）。
+    /// 全区間記録は書き込み中のチャンクを閉じるため、復帰後は転送可能な状態になる。
     func stopSession() {
         guard isRecording else { return }
 
         isRecording = false
         motionRepo.stopSampling()
+        continuousRepo?.endSession()
         samplingTask?.cancel()
         samplingTask = nil
         detector = nil
@@ -146,6 +157,9 @@ final class RecordSessionUseCase: ObservableObject {
             lastRawTimestampMs = lastSample.timestampMs
         }
         rawSampleCount += batch.count
+
+        // 全区間記録（W6-T14）。検知結果に依存しないため検知より先に行う
+        continuousRepo?.append(batch, receivedAt: Date())
 
         // スイング検知・ウィンドウ切り出し（F-W3）
         guard let detector else { return }

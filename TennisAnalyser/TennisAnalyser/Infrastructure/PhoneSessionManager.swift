@@ -17,9 +17,13 @@ import os
 final class PhoneSessionManager: NSObject {
 
     private let store: SwingStore
+    private let continuousStore: ContinuousSensorStore
     private let videoStore: VideoStore
     private let recorder: PracticeVideoRecorder
     private let diagnostics: DiagnosticsStore
+
+    /// 転送 metadata の種別（Watch 側 `WCSessionTransferRepository` と対応する）
+    private static let metadataTypeContinuousChunk = "continuousChunk"
 
     /// セッション終了通知からこの秒数だけ待ってから、未生成クリップの生成を試みる。
     /// Watch→iPhone のスイング転送は F-W5 で「10秒以内」を目安としているため、
@@ -28,11 +32,13 @@ final class PhoneSessionManager: NSObject {
 
     init(
         store: SwingStore,
+        continuousStore: ContinuousSensorStore,
         videoStore: VideoStore,
         recorder: PracticeVideoRecorder,
         diagnostics: DiagnosticsStore
     ) {
         self.store = store
+        self.continuousStore = continuousStore
         self.videoStore = videoStore
         self.recorder = recorder
         self.diagnostics = diagnostics
@@ -78,7 +84,13 @@ extension PhoneSessionManager: WCSessionDelegate {
     func session(_ session: WCSession, didReceive file: WCSessionFile) {
         // 注意: file.fileURL は本メソッドの return 後に無効になるため同期的に取り込む
         AppLog.transfer.info("received \(file.fileURL.lastPathComponent, privacy: .public)")
-        store.ingest(tempURL: file.fileURL, metadata: file.metadata)
+        // W6-T14: 種別無しはスイング（type キーを持たない旧ビルドの転送が
+        // WCSession の永続キューに残り得るため、既定をスイングとする）
+        if file.metadata?["type"] as? String == Self.metadataTypeContinuousChunk {
+            continuousStore.ingest(tempURL: file.fileURL, metadata: file.metadata)
+        } else {
+            store.ingest(tempURL: file.fileURL, metadata: file.metadata)
+        }
     }
 
     /// F-I6: Watch からのセッション開始/終了通知を受けてカメラ録画を自動制御する

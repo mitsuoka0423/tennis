@@ -13,6 +13,8 @@ import os
 /// - スイング保存のたびに `enqueue` で転送キューへ追加（バックグラウンド転送）
 /// - 転送完了コールバックでローカル CSV を削除（F-W5 + ストレージ保護）
 /// - 未転送分は `retryPending` で再送（アクティベート完了時・ワークアウト終了時）
+/// - 連続センサー記録のチャンクは `retryPending` でのみ送る（W6-T14）。
+///   1時間で約46MB になり、セッション中に送るとスイング転送と帯域を奪い合うため
 /// - WCSession の転送キューはプロセス再起動を跨いで永続化されるため、
 ///   `outstandingFileTransfers` と突き合わせて二重エンキューを防ぐ
 ///
@@ -20,9 +22,19 @@ import os
 /// Phase 1 の教訓に従い actor 隔離はせず、UI 通知のみ main queue へディスパッチする。
 final class WCSessionTransferRepository: NSObject, SwingTransferRepository {
 
+    // MARK: - Constants
+
+    /// 転送 metadata の種別。iPhone 側（`PhoneSessionManager`）が取り込み先を振り分ける
+    static let metadataTypeSwing = "swing"
+    static let metadataTypeContinuousChunk = "continuousChunk"
+
+    /// 連続センサー記録の保存ディレクトリ名（転送完了時の削除先の判別に使う）
+    static let continuousDirectoryName = "continuous"
+
     // MARK: - Dependencies
 
     private let swingRepo: any SwingRepository
+    private let continuousRepo: (any ContinuousSensorRepository)?
 
     // MARK: - State
 
@@ -33,8 +45,12 @@ final class WCSessionTransferRepository: NSObject, SwingTransferRepository {
 
     // MARK: - Init
 
-    init(swingRepo: any SwingRepository) {
+    init(
+        swingRepo: any SwingRepository,
+        continuousRepo: (any ContinuousSensorRepository)? = nil
+    ) {
         self.swingRepo = swingRepo
+        self.continuousRepo = continuousRepo
         super.init()
     }
 
@@ -51,6 +67,7 @@ final class WCSessionTransferRepository: NSObject, SwingTransferRepository {
 
     func enqueue(fileURL: URL, swing: Swing) {
         let metadata: [String: Any] = [
+            "type": Self.metadataTypeSwing,
             "swingId": swing.id,
             "sessionId": swing.sessionId,
             "sequence": swing.sequence,
@@ -66,16 +83,31 @@ final class WCSessionTransferRepository: NSObject, SwingTransferRepository {
         guard session.activationState == .activated else { return }
         // WCSession キューに載っていないローカル残存ファイルを再エンキュー
         let outstanding = Set(session.outstandingFileTransfers.map { $0.file.fileURL.path })
+
         let localFiles = (try? swingRepo.listFiles()) ?? []
         for url in localFiles where !outstanding.contains(url.path) {
             // メタデータはパスから復元（CSV ヘッダーにも全メタ情報あり = 冗長設計）
             let metadata: [String: Any] = [
+                "type": Self.metadataTypeSwing,
                 "sessionId": url.deletingLastPathComponent().lastPathComponent,
                 "sequence": Int(url.deletingPathExtension().lastPathComponent) ?? 0,
             ]
             session.transferFile(url, metadata: metadata)
             AppLog.transfer.info("re-enqueued \(url.lastPathComponent, privacy: .public)")
         }
+
+        // W6-T14: 連続センサー記録のチャンク（書き込み中のチャンクは listFiles に現れない）
+        let chunks = continuousRepo.flatMap { try? $0.listFiles() } ?? []
+        for url in chunks where !outstanding.contains(url.path) {
+            let metadata: [String: Any] = [
+                "type": Self.metadataTypeContinuousChunk,
+                "sessionId": url.deletingLastPathComponent().lastPathComponent,
+                "chunkIndex": Int(url.deletingPathExtension().lastPathComponent) ?? 0,
+            ]
+            session.transferFile(url, metadata: metadata)
+            AppLog.transfer.info("enqueued chunk \(url.lastPathComponent, privacy: .public)")
+        }
+
         notifyStatus()
     }
 
@@ -149,8 +181,15 @@ extension WCSessionTransferRepository: WCSessionDelegate {
             transferredCount += 1
             AppLog.transfer.info("transfer finished \(url.lastPathComponent, privacy: .public)")
             // 転送完了後にローカルキャッシュを削除（F-W5 / ストレージ保護）
+            // 削除先の振り分けは metadata ではなく保存先パスで行う。metadata は
+            // 転送キューの永続化を跨いで古い形式（type 無し）が残り得るため
+            let isChunk = url.pathComponents.contains(Self.continuousDirectoryName)
             do {
-                try swingRepo.deleteFile(at: url)
+                if isChunk {
+                    try continuousRepo?.deleteFile(at: url)
+                } else {
+                    try swingRepo.deleteFile(at: url)
+                }
             } catch {
                 AppLog.transfer.error("cleanup failed: \(error.localizedDescription, privacy: .public)")
             }

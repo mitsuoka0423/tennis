@@ -67,6 +67,9 @@ final class WorkoutViewModel: ObservableObject {
         self.workoutSessionManager = workoutSessionManager ?? WorkoutSessionManager()
 
         let swingRepo = SwingRepositoryImpl()
+        // W6-T14: スイング単位保存と併存させる。次回の実機検証1回で両方式のデータを
+        // 同時に採り、比較してから移行を判断する（後戻りの経路を残すため）
+        let continuousRepo = ContinuousSensorRepositoryImpl()
         if let useCase = recordSessionUseCase {
             self.recordSessionUseCase = useCase
         } else {
@@ -75,11 +78,14 @@ final class WorkoutViewModel: ObservableObject {
                 : MotionSensorRepositoryImpl()
             self.recordSessionUseCase = RecordSessionUseCase(
                 motionRepo: motionRepo,
-                swingRepo: swingRepo
+                swingRepo: swingRepo,
+                continuousRepo: continuousRepo
             )
         }
         // F-W5: 保存済みスイングを WCSession で iPhone へ逐次転送
-        self.transferRepo = WCSessionTransferRepository(swingRepo: swingRepo)
+        self.transferRepo = WCSessionTransferRepository(
+            swingRepo: swingRepo, continuousRepo: continuousRepo
+        )
 
         observeUseCase()
         wireTransfer()

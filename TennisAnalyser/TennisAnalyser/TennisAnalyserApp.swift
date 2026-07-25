@@ -11,6 +11,7 @@ import SwiftUI
 struct TennisAnalyserApp: App {
 
     @StateObject private var store: SwingStore
+    @StateObject private var continuousStore: ContinuousSensorStore
     @StateObject private var videoStore: VideoStore
     @StateObject private var recorder: PracticeVideoRecorder
     private let sessionManager: PhoneSessionManager
@@ -22,9 +23,11 @@ struct TennisAnalyserApp: App {
         let diagnostics = DiagnosticsStore()
         self.diagnostics = diagnostics
         let store = SwingStore()
+        let continuousStore = ContinuousSensorStore()
         let videoStore = VideoStore(diagnostics: diagnostics)
         let recorder = PracticeVideoRecorder(videoStore: videoStore, diagnostics: diagnostics)
         _store = StateObject(wrappedValue: store)
+        _continuousStore = StateObject(wrappedValue: continuousStore)
         _videoStore = StateObject(wrappedValue: videoStore)
         // recorder は videoStore と同一インスタンスを共有する必要があるため App 側で生成する
         // （RecordingCameraView の init 内では @EnvironmentObject がまだ解決できないため）
@@ -38,7 +41,11 @@ struct TennisAnalyserApp: App {
         }
 
         sessionManager = PhoneSessionManager(
-            store: store, videoStore: videoStore, recorder: recorder, diagnostics: diagnostics
+            store: store,
+            continuousStore: continuousStore,
+            videoStore: videoStore,
+            recorder: recorder,
+            diagnostics: diagnostics
         )
         sessionManager.activate()
     }
@@ -47,11 +54,13 @@ struct TennisAnalyserApp: App {
         WindowGroup {
             RootTabView(diagnostics: diagnostics)
                 .environmentObject(store)
+                .environmentObject(continuousStore)
                 .environmentObject(videoStore)
                 .environmentObject(recorder)
                 .task {
                     videoStore.removeLegacyLayout()
                     store.reload()
+                    continuousStore.reload()
                     videoStore.reload()
                 }
         }

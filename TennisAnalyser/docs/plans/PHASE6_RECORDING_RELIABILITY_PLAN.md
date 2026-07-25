@@ -1,6 +1,6 @@
 # F-I7 録画継続性 実装計画（Phase 6）
 
-**状態: W1〜W4 完了 / W6 未着手**（2026-07-25）
+**状態: W1〜W4 完了 / W6 着手中（T14 完了）**（2026-07-25）
 **仕様**: [docs/RECORDING_RELIABILITY_SPEC.md](../RECORDING_RELIABILITY_SPEC.md)
 **契機**: 2026-07-21 実機検証で 325スイング中クリップ1件のみ生成される不具合を確認
 
@@ -247,13 +247,28 @@ W1・W2（録画継続・セグメント分割）は**変更なく必要**。動
 > 1件あたり5秒を超えると練習時間と同等のタグ付け時間が必要になり運用が破綻する。
 > W6 の設計判断はすべてこれに従属する。
 
-- [ ] **T14: センサーの全区間保存**
-  - Watch 側に連続保存の経路を追加する。約 46 MB/時（200Hz・現行CSV形式）
-  - 連続センシング自体は既に行っている（`SwingDetector` が窓の外を捨てているだけ）ため
-    電力コストの増加はほぼ無い。増えるのは書き込みと転送量（16MB → 46MB/時）
-  - **既存の per-swing CSV と併存させる**。次回の実機検証1回で両方式のデータが同時に採れ、
-    比較してから移行を判断できる。後戻りの経路を残すため
-  - 転送はセッション終了後にまとめて行う（`transferFile` の逐次送信は量的に不向き）
+- [x] **T14: センサーの全区間保存** ✅ 2026-07-25
+  - Watch: `ContinuousSensorRepository`（Domain）+ `ContinuousSensorRepositoryImpl`（Infrastructure）
+    - 保存先 `Documents/continuous/{sessionId}/{chunkIndex}.csv`。5分（60,000サンプル）でチャンク分割
+    - 列構成はスイング単位CSVと同一（ShotClass 列のみ無い）。iPhone 側の
+      `SwingCSVParser.parseSamples` をそのまま流用できるため
+    - ヘッダーに時刻アンカー（`AnchorSensorMs` / `AnchorWallClock`）を持たせた。
+      センサータイムスタンプは Watch 起動からの経過時間であり、動画（壁時計）と
+      対応付ける基準がファイル内に無いと事後の突き合わせができない
+  - 転送: `retryPending` の経路に載せる（セッション終了時・アクティベート時のみ）。
+    セッション中に送るとスイング転送と帯域を奪い合うため
+  - iOS: `ContinuousChunk` / `ContinuousChunkParser`（Domain）+ `ContinuousSensorStore`
+    （Infrastructure）。`PhoneSessionManager` が metadata の `type` で取り込み先を振り分ける
+  - **既存の per-swing CSV と併存**（両方式のデータが1回の実機検証で同時に採れる）
+  - テスト: Watch 7件 ✅ / iOS 5件 ✅（CLI）
+  - ⚠️ Xcode GUI ビルドは未確認（Xcode MCP が無い環境。AGENTS.md ルール5）
+
+  > Why not 1セッション1ファイル: 1時間で約46MB になり、転送が途中で失敗すると全量を
+  > 送り直すことになる。チャンク単位なら未転送分だけを再送できる。
+
+  > Why not FileHandle を開いたまま保持する: 追記のたびに開閉すると1秒1回のコストで済み、
+  > 異常終了時もそこまでの記録がディスクに残る。ハンドルを書き込みキューの外へ
+  > 持ち出さずに済むため状態の共有も生じない。
 
 - [ ] **T15: オフライン検知器**
   - 既存の `SwingDetector` を連続データに対して走らせ、候補を提示する
