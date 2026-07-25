@@ -254,6 +254,34 @@ struct WaveformDownsamplerTests {
         #expect(bins[0].peakAcceleration == 3.0)
     }
 
+    // 正常系: チャンクごとに間引いた結果を統合しても最大値が保たれること
+    //（セッション全体を一度に保持しないための分割読み込み。W6-T16d）
+    @Test func mergingKeepsPeaksFromBothSides() {
+        let range = DateInterval(start: base, end: base.addingTimeInterval(2))
+        let first = WaveformDownsampler.bins(
+            from: makeSamples([(0.5, 9.0)]), range: range, binCount: 2
+        )
+        let second = WaveformDownsampler.bins(
+            from: makeSamples([(1.5, 5.0)]), range: range, binCount: 2
+        )
+
+        let merged = WaveformDownsampler.merging(first, second)
+
+        #expect(merged.map(\.peakAcceleration) == [9.0, 5.0])
+        #expect(merged.map(\.hasSamples) == [true, true])
+    }
+
+    // 正常系: 片方が空なら他方をそのまま返すこと（重なるチャンクが1本の場合）
+    @Test func mergingWithEmptyReturnsOther() {
+        let range = DateInterval(start: base, end: base.addingTimeInterval(1))
+        let bins = WaveformDownsampler.bins(
+            from: makeSamples([(0.5, 3.0)]), range: range, binCount: 1
+        )
+
+        #expect(WaveformDownsampler.merging([], bins) == bins)
+        #expect(WaveformDownsampler.merging(bins, []) == bins)
+    }
+
     // 異常系: ビン数0・長さ0の範囲では空を返すこと
     @Test func returnsEmptyForDegenerateInput() {
         #expect(WaveformDownsampler.bins(

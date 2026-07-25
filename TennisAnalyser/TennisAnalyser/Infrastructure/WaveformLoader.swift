@@ -34,30 +34,46 @@ enum WaveformLoader {
         for (offset, chunk) in sorted.enumerated() {
             let estimated = estimatedRange(of: chunk, next: sorted[safe: offset + 1])
             guard estimated.intersects(range) else { continue }
-            for point in ContinuousChunkParser.parseSamples(fileURL: chunk.fileURL) {
-                let date = chunk.wallClock(forSensorMs: point.timestampMs)
-                guard date >= range.start, date <= range.end else { continue }
-                samples.append(TimedSample(
-                    date: date,
-                    acceleration: point.accelerationMagnitude,
-                    gyro: point.gyroMagnitude
-                ))
-            }
+            samples.append(contentsOf: self.samples(in: chunk, range: range))
         }
         return samples.sorted { $0.date < $1.date }
     }
 
+    /// チャンク1本から対象範囲のサンプルを読む
+    nonisolated static func samples(in chunk: ContinuousChunk, range: DateInterval) -> [TimedSample] {
+        ContinuousChunkParser.parseSamples(fileURL: chunk.fileURL).compactMap { point in
+            let date = chunk.wallClock(forSensorMs: point.timestampMs)
+            guard date >= range.start, date <= range.end else { return nil }
+            return TimedSample(
+                date: date,
+                acceleration: point.accelerationMagnitude,
+                gyro: point.gyroMagnitude
+            )
+        }
+    }
+
     /// 対象範囲の波形をビン化して返す
+    ///
+    /// Why not 全サンプルを集めてから間引く: セッション全体を対象にすると
+    /// 約68万サンプルを同時に保持することになる。チャンクごとに間引いて
+    /// 最大値で統合すれば、まとめて間引いた結果と一致したまま
+    /// 保持量を1チャンク分に抑えられる。
     nonisolated static func loadBins(
         chunks: [ContinuousChunk],
         range: DateInterval,
         binCount: Int
     ) -> [WaveformBin] {
-        WaveformDownsampler.bins(
-            from: loadSamples(chunks: chunks, range: range),
-            range: range,
-            binCount: binCount
-        )
+        let sorted = chunks.sorted { $0.index < $1.index }
+        var merged: [WaveformBin] = []
+        for (offset, chunk) in sorted.enumerated() {
+            let estimated = estimatedRange(of: chunk, next: sorted[safe: offset + 1])
+            guard estimated.intersects(range) else { continue }
+            let bins = WaveformDownsampler.bins(
+                from: samples(in: chunk, range: range), range: range, binCount: binCount
+            )
+            merged = WaveformDownsampler.merging(merged, bins)
+        }
+        return merged
     }
 
     /// チャンクが覆う時間範囲を推定する

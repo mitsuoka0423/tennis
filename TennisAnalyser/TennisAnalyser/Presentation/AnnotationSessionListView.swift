@@ -29,6 +29,11 @@ struct AnnotationSessionListView: View {
                             } label: {
                                 Label("選別", systemImage: "checklist")
                             }
+                            NavigationLink {
+                                AnnotationTimelineView(session: session)
+                            } label: {
+                                Label("タイムライン", systemImage: "waveform.path")
+                            }
                         } header: {
                             sessionHeader(session)
                         }

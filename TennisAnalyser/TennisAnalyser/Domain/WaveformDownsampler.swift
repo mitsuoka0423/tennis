@@ -68,4 +68,21 @@ enum WaveformDownsampler {
             )
         }
     }
+
+    /// 同一区間割りのビン列を最大値で統合する
+    ///
+    /// チャンクを1本ずつ読んで統合するために用いる。最大値の最大値は全体の最大値と
+    /// 一致するため、まとめて間引いた結果と同じになる。
+    nonisolated static func merging(_ lhs: [WaveformBin], _ rhs: [WaveformBin]) -> [WaveformBin] {
+        guard !lhs.isEmpty else { return rhs }
+        guard !rhs.isEmpty, lhs.count == rhs.count else { return lhs }
+        return zip(lhs, rhs).map { left, right in
+            WaveformBin(
+                startedAt: left.startedAt,
+                peakAcceleration: max(left.peakAcceleration, right.peakAcceleration),
+                peakGyro: max(left.peakGyro, right.peakGyro),
+                hasSamples: left.hasSamples || right.hasSamples
+            )
+        }
+    }
 }
