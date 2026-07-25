@@ -6,6 +6,7 @@
 
 import Foundation
 import WatchConnectivity
+import os
 
 /// `WCSession.transferFile` によるスイングファイル転送の実装
 ///
@@ -41,7 +42,7 @@ final class WCSessionTransferRepository: NSObject, SwingTransferRepository {
 
     func activate() {
         guard WCSession.isSupported() else {
-            print("[Transfer] WCSession not supported")
+            AppLog.transfer.error("WCSession not supported on this device")
             return
         }
         session.delegate = self
@@ -57,7 +58,7 @@ final class WCSessionTransferRepository: NSObject, SwingTransferRepository {
             "peakAcceleration": swing.peakAcceleration,
         ]
         session.transferFile(fileURL, metadata: metadata)
-        print("[Transfer] enqueued swing #\(swing.sequence) (\(fileURL.lastPathComponent))")
+        AppLog.transfer.info("enqueued swing #\(swing.sequence, privacy: .public) (\(fileURL.lastPathComponent, privacy: .public))")
         notifyStatus()
     }
 
@@ -73,7 +74,7 @@ final class WCSessionTransferRepository: NSObject, SwingTransferRepository {
                 "sequence": Int(url.deletingPathExtension().lastPathComponent) ?? 0,
             ]
             session.transferFile(url, metadata: metadata)
-            print("[Transfer] re-enqueued \(url.lastPathComponent)")
+            AppLog.transfer.info("re-enqueued \(url.lastPathComponent, privacy: .public)")
         }
         notifyStatus()
     }
@@ -99,9 +100,9 @@ final class WCSessionTransferRepository: NSObject, SwingTransferRepository {
                 "status": status,
                 "timestamp": ISO8601DateFormatter().string(from: Date()),
             ])
-            print("[Transfer] session \(status): \(sessionId)")
+            AppLog.transfer.info("session \(status, privacy: .public): \(sessionId, privacy: .public)")
         } catch {
-            print("[Transfer] updateApplicationContext error: \(error)")
+            AppLog.transfer.error("updateApplicationContext failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -131,10 +132,10 @@ extension WCSessionTransferRepository: WCSessionDelegate {
         error: Error?
     ) {
         if let error {
-            print("[Transfer] activation error: \(error)")
+            AppLog.transfer.error("activation failed: \(error.localizedDescription, privacy: .public)")
             return
         }
-        print("[Transfer] activated: \(activationState.rawValue)")
+        AppLog.transfer.info("activated: state=\(activationState.rawValue, privacy: .public)")
         // アクティベート完了時に未転送分を再送（前回セッションの残り）
         retryPending()
     }
@@ -143,15 +144,15 @@ extension WCSessionTransferRepository: WCSessionDelegate {
         let url = fileTransfer.file.fileURL
         if let error {
             // 失敗分はローカルに残し、次回 retryPending で再送する
-            print("[Transfer] failed \(url.lastPathComponent): \(error)")
+            AppLog.transfer.error("transfer failed \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
         } else {
             transferredCount += 1
-            print("[Transfer] finished \(url.lastPathComponent)")
+            AppLog.transfer.info("transfer finished \(url.lastPathComponent, privacy: .public)")
             // 転送完了後にローカルキャッシュを削除（F-W5 / ストレージ保護）
             do {
                 try swingRepo.deleteFile(at: url)
             } catch {
-                print("[Transfer] cleanup error: \(error)")
+                AppLog.transfer.error("cleanup failed: \(error.localizedDescription, privacy: .public)")
             }
         }
         notifyStatus(excluding: fileTransfer)

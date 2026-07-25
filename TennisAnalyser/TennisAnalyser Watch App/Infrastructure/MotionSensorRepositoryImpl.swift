@@ -6,6 +6,7 @@
 
 import Foundation
 import CoreMotion
+import os
 
 /// `CMBatchedSensorManager` を使った高頻度センサーデータ取得の実装
 ///
@@ -33,26 +34,26 @@ final class MotionSensorRepositoryImpl: MotionSensorRepository {
 
             samplingTask = Task {
                 do {
-                    print("[Motion] deviceMotionUpdates start")
+                    AppLog.motion.info("deviceMotionUpdates started")
                     var batchCount = 0
                     for try await batch in manager.deviceMotionUpdates() {
                         guard !Task.isCancelled else {
-                            print("[Motion] Task cancelled")
+                            AppLog.motion.info("stream task cancelled")
                             break
                         }
                         batchCount += 1
                         if batchCount <= 3 {
-                            print("[Motion] batch #\(batchCount): \(batch.count) samples")
+                            AppLog.motion.debug("batch #\(batchCount, privacy: .public): \(batch.count, privacy: .public) samples")
                         }
                         let samples = batch.map { Self.makeSample(from: $0) }
                         if !samples.isEmpty {
                             continuation.yield(samples)
                         }
                     }
-                    print("[Motion] stream ended normally")
+                    AppLog.motion.info("stream ended normally")
                     continuation.finish()
                 } catch {
-                    print("[Motion] error: \(error)")
+                    AppLog.motion.error("stream error: \(error.localizedDescription, privacy: .public)")
                     continuation.finish(throwing: error)
                 }
             }

@@ -13,6 +13,7 @@
 import Foundation
 import AVFoundation
 import Combine
+import os
 
 /// 練習動画の保管庫
 ///
@@ -77,7 +78,7 @@ final class VideoStore: ObservableObject {
                     return try? decoder.decode(PracticeVideo.self, from: data)
                 }
         } catch {
-            print("[VideoStore] reloadSources error: \(error)")
+            AppLog.clip.error("reloadSources failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -116,7 +117,7 @@ final class VideoStore: ObservableObject {
             try data.write(to: url, options: .atomic)
             reloadSources()
         } catch {
-            print("[VideoStore] saveSourceMetadata error: \(error)")
+            AppLog.clip.error("saveSourceMetadata failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -148,17 +149,37 @@ final class VideoStore: ObservableObject {
     ///   - sessionId/sequence: スイングの識別子（CSV と同じキー）
     ///   - detectedAt: スイングのインパクト壁時計時刻
     func extractClipIfNeeded(sessionId: String, sequence: Int, detectedAt: Date?) async {
+        // Why not 黙って return: 2026-07-21 の実機検証では 325スイング中 1件しか
+        // クリップが生成されなかったが、全ての失敗経路が無言だったため原因の切り分けに
+        // ファイル配置からの逆算が必要だった。諦める理由を必ず記録する（F-I7-6）。
+        let key = "\(sessionId)/\(sequence)"
         guard !hasClip(sessionId: sessionId, sequence: sequence) else { return }
-        guard let detectedAt else { return }
+        guard let detectedAt else {
+            AppLog.clip.error("skip \(key, privacy: .public): detectedAt missing")
+            return
+        }
         guard let source = sources.first(where: { $0.id == sessionId }) else {
-            // 継続録画が見つからない（録画していなかった等）。F-I6 は無くても支障ない機能なので黙って諦める
+            AppLog.clip.error("skip \(key, privacy: .public): no source recording for session")
             return
         }
         guard let sourceURL = try? sourcesDirectory.appendingPathComponent("\(source.id).mov"),
               fileManager.fileExists(atPath: sourceURL.path)
-        else { return }
+        else {
+            AppLog.clip.error("skip \(key, privacy: .public): source file missing on disk")
+            return
+        }
         // 録画中（endedAt 未確定）は正しい範囲が定まらないため、確定後の reload で再試行される
-        guard let offset = source.offsetSeconds(for: detectedAt) else { return }
+        guard let offset = source.offsetSeconds(for: detectedAt) else {
+            let ended = source.endedAt.map { "\($0)" } ?? "nil(recording)"
+            AppLog.clip.error(
+                """
+                skip \(key, privacy: .public): detectedAt out of source range \
+                (detectedAt=\(detectedAt, privacy: .public) \
+                startedAt=\(source.startedAt, privacy: .public) endedAt=\(ended, privacy: .public))
+                """
+            )
+            return
+        }
 
         let startSeconds = max(0, offset - Self.preRollSeconds)
         let endSeconds = offset + Self.postRollSeconds
@@ -171,9 +192,9 @@ final class VideoStore: ObservableObject {
             }
             try await exportClip(from: sourceURL, to: destURL, startSeconds: startSeconds, endSeconds: endSeconds)
             reloadClipKeys()
-            print("[VideoStore] clip extracted: \(sessionId)/\(sequence).mov")
+            AppLog.clip.info("extracted \(key, privacy: .public) at offset \(offset, format: .fixed(precision: 2))s")
         } catch {
-            print("[VideoStore] extractClip error: \(error)")
+            AppLog.clip.error("extract failed \(key, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
     }
 

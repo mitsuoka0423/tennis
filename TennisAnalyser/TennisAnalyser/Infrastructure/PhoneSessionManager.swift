@@ -7,6 +7,7 @@
 
 import Foundation
 import WatchConnectivity
+import os
 
 /// Watch からのスイングファイル受信・セッション状態通知を扱うセッションマネージャ
 ///
@@ -34,7 +35,7 @@ final class PhoneSessionManager: NSObject {
     /// 受信セッションを有効化する（アプリ起動時に1回）
     func activate() {
         guard WCSession.isSupported() else {
-            print("[PhoneSession] WCSession not supported")
+            AppLog.transfer.error("WCSession not supported on this device")
             return
         }
         WCSession.default.delegate = self
@@ -52,14 +53,14 @@ extension PhoneSessionManager: WCSessionDelegate {
         error: Error?
     ) {
         if let error {
-            print("[PhoneSession] activation error: \(error)")
+            AppLog.transfer.error("activation failed: \(error.localizedDescription, privacy: .public)")
         } else {
-            print("[PhoneSession] activated: \(activationState.rawValue)")
+            AppLog.transfer.info("activated: state=\(activationState.rawValue, privacy: .public)")
         }
     }
 
     func sessionDidBecomeInactive(_ session: WCSession) {
-        print("[PhoneSession] became inactive")
+        AppLog.transfer.info("session became inactive")
     }
 
     func sessionDidDeactivate(_ session: WCSession) {
@@ -69,7 +70,7 @@ extension PhoneSessionManager: WCSessionDelegate {
 
     func session(_ session: WCSession, didReceive file: WCSessionFile) {
         // 注意: file.fileURL は本メソッドの return 後に無効になるため同期的に取り込む
-        print("[PhoneSession] received \(file.fileURL.lastPathComponent)")
+        AppLog.transfer.info("received \(file.fileURL.lastPathComponent, privacy: .public)")
         store.ingest(tempURL: file.fileURL, metadata: file.metadata)
     }
 
@@ -83,10 +84,10 @@ extension PhoneSessionManager: WCSessionDelegate {
         Task { @MainActor in
             switch status {
             case "started":
-                print("[PhoneSession] session started: \(sessionId)")
+                AppLog.session.info("session started: \(sessionId, privacy: .public)")
                 self.recorder.startRecording(sessionId: sessionId)
             case "ended":
-                print("[PhoneSession] session ended: \(sessionId)")
+                AppLog.session.info("session ended: \(sessionId, privacy: .public)")
                 self.recorder.stopRecording()
                 self.scheduleSourceCleanup(sessionId: sessionId)
             default:

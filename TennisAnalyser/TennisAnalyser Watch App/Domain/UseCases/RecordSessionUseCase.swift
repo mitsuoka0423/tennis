@@ -6,6 +6,7 @@
 
 import Foundation
 import Combine
+import os
 
 /// ワークアウトセッションを通じてスイングを検知・保存するユースケース
 ///
@@ -104,13 +105,13 @@ final class RecordSessionUseCase: ObservableObject {
         samplingTask = Task.detached { [weak self] in
             guard let self else { return }
             let stream = await self.motionRepo.startSampling(targetHz: await self.targetHz)
-            print("[UseCase] sampling stream started")
+            AppLog.swing.info("sampling stream started")
             do {
                 for try await batch in stream {
                     await self.processBatch(batch)
                 }
             } catch {
-                print("[UseCase] stream error: \(error)")
+                AppLog.swing.error("stream error: \(error.localizedDescription, privacy: .public)")
                 await MainActor.run {
                     self.error = error
                     self.isRecording = false
@@ -162,10 +163,10 @@ final class RecordSessionUseCase: ObservableObject {
             guard let self else { return }
             do {
                 let url = try await self.swingRepo.save(swing: swing)
-                print("[UseCase] swing #\(swing.sequence) saved: \(url.lastPathComponent) (\(swing.samples.count) samples)")
+                AppLog.swing.info("swing #\(swing.sequence, privacy: .public) saved: \(url.lastPathComponent, privacy: .public) (\(swing.samples.count, privacy: .public) samples)")
                 self.onSwingSaved?(swing, url)
             } catch {
-                print("[UseCase] swing save error: \(error)")
+                AppLog.swing.error("swing save failed: \(error.localizedDescription, privacy: .public)")
                 self.error = error
             }
         }

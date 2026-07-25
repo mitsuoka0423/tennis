@@ -6,6 +6,7 @@
 
 import Foundation
 import Combine
+import os
 
 /// 受信済みスイングファイルの保管庫
 ///
@@ -54,7 +55,7 @@ final class SwingStore: ObservableObject {
                 .compactMap { SwingCSVParser.parseMetadata(fileURL: $0) }
                 .sorted { ($0.detectedAt ?? .distantPast) > ($1.detectedAt ?? .distantPast) }
         } catch {
-            print("[SwingStore] reload error: \(error)")
+            AppLog.store.error("reload failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -88,7 +89,7 @@ final class SwingStore: ObservableObject {
                 try fm.removeItem(at: dest)  // 再送による重複は上書き
             }
             try fm.moveItem(at: tempURL, to: dest)
-            print("[SwingStore] ingested \(sessionId)/\(dest.lastPathComponent)")
+            AppLog.store.info("ingested \(sessionId, privacy: .public)/\(dest.lastPathComponent, privacy: .public)")
 
             // 移動後のファイルから確定情報を読み直す（メタデータの欠損に強くするため。
             // 再送時は sessionId/sequence のみしか metadata に無いことがあるが、
@@ -101,7 +102,7 @@ final class SwingStore: ObservableObject {
                 }
             }
         } catch {
-            print("[SwingStore] ingest error: \(error)")
+            AppLog.store.error("ingest failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -111,7 +112,7 @@ final class SwingStore: ObservableObject {
             try SwingCSVParser.writeShotClass(fileURL: record.fileURL, shotClass: shotClass)
             reload()
         } catch {
-            print("[SwingStore] setShotClass error: \(error)")
+            AppLog.store.error("setShotClass failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -121,7 +122,7 @@ final class SwingStore: ObservableObject {
             do {
                 try SwingCSVParser.writeShotClass(fileURL: record.fileURL, shotClass: shotClass)
             } catch {
-                print("[SwingStore] setShotClass error: \(error)")
+                AppLog.store.error("setShotClass failed: \(error.localizedDescription, privacy: .public)")
             }
         }
         reload()
