@@ -48,6 +48,11 @@ struct SwingSamplePoint: Identifiable {
     var accelerationMagnitude: Double {
         (accX * accX + accY * accY + accZ * accZ).squareRoot()
     }
+
+    /// 角速度ベクトルの大きさ (°/s)
+    var gyroMagnitude: Double {
+        (gyroX * gyroX + gyroY * gyroY + gyroZ * gyroZ).squareRoot()
+    }
 }
 
 /// 受信済みスイング（一覧表示用のメタ情報 + 遅延ロードされる波形）
