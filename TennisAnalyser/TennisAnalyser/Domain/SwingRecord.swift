@@ -11,7 +11,7 @@ import Foundation
 ///
 /// Watch 側 `MotionSample.ShotClass`（TennisAnalyser Watch App/Domain/Entities/MotionSample.swift）
 /// と rawValue を一致させること。ターゲットが別のため独立定義（CSV の文字列経由で往復する）。
-enum ShotClass: String, Equatable, Sendable, CaseIterable, Identifiable {
+enum ShotClass: String, Equatable, Sendable, CaseIterable, Identifiable, Codable {
     case strokeForehand = "STROKE_FOREHAND"
     case strokeBackhand = "STROKE_BACKHAND"
     case volleyForehand = "VOLLEY_FOREHAND"
@@ -45,12 +45,13 @@ struct SwingSamplePoint: Identifiable {
     let gyroY: Double
     let gyroZ: Double
 
-    var accelerationMagnitude: Double {
+    // 検知をバックグラウンドで走らせるため nonisolated（既定の MainActor 隔離を外す）
+    nonisolated var accelerationMagnitude: Double {
         (accX * accX + accY * accY + accZ * accZ).squareRoot()
     }
 
     /// 角速度ベクトルの大きさ (°/s)
-    var gyroMagnitude: Double {
+    nonisolated var gyroMagnitude: Double {
         (gyroX * gyroX + gyroY * gyroY + gyroZ * gyroZ).squareRoot()
     }
 }

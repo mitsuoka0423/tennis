@@ -25,12 +25,13 @@ struct ContinuousChunk: Identifiable, Equatable {
     let anchorWallClock: Date
 
     /// センサータイムスタンプ (ms) に対応する壁時計時刻
-    func wallClock(forSensorMs sensorMs: Int64) -> Date {
+    // 検知をバックグラウンドで走らせるため nonisolated（既定の MainActor 隔離を外す）
+    nonisolated func wallClock(forSensorMs sensorMs: Int64) -> Date {
         anchorWallClock.addingTimeInterval(Double(sensorMs - anchorSensorMs) / 1000.0)
     }
 
     /// 壁時計時刻に対応するセンサータイムスタンプ (ms)
-    func sensorMs(forWallClock date: Date) -> Int64 {
+    nonisolated func sensorMs(forWallClock date: Date) -> Int64 {
         anchorSensorMs + Int64((date.timeIntervalSince(anchorWallClock) * 1000.0).rounded())
     }
 }
@@ -43,7 +44,7 @@ enum ContinuousChunkParser {
     // 純関数のパーサは nonisolated を明示してバックグラウンドから呼べるようにする
 
     /// ヘッダーの先頭バイトだけを読む量。コメント4行＋列見出しに十分な余裕を取る
-    private static let headerProbeBytes = 512
+    nonisolated private static let headerProbeBytes = 512
 
     /// チャンクのメタ情報をパースする（ファイル全体は読まない）
     ///

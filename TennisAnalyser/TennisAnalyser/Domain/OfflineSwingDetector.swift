@@ -40,7 +40,8 @@ struct OfflineDetectorParameters: Equatable, Codable {
     /// 有効にした場合も候補が消えるだけで記録は残るため、事後に付け直せる。
     var minGyroPeakDegPerSec: Double?
 
-    init(
+    // バックグラウンドで検知を走らせるため nonisolated（既定の MainActor 隔離を外す）
+    nonisolated init(
         accelerationThreshold: Double = 3.0,
         rearmSeconds: Double = 0.4,
         peakSearchSeconds: Double = 0.15,
