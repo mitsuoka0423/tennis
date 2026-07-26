@@ -1,0 +1,103 @@
+# 2026-07-26 作業ログ
+
+## 実行計画
+
+1. F-I7 の実機短時間確認の結果を評価する
+2. アノテーション画面の実機テストケースを列挙し、チェックリスト化する
+3. dspec をトライアル導入し、仕様の機械検証を始める
+
+## 作業ログ
+
+### 1. F-I7 実機短時間確認の結果（ユーザー実施）
+
+セッション `013B404F-C42A-453D-A9B5-29C43E99E687`（24秒）。
+
+| 項目 | 実測 |
+|---|---|
+| 録画時間 / セッション時間 | 0分21秒 / 0分24秒 |
+| カバー率 | 87.5% |
+| セグメント数 / 中断回数 | 3 / 4 |
+| クリップ | 成功0 / 失敗0 |
+
+**中断からの復帰が機能している**ことを確認した。欠落3秒を中断3回で割ると
+復帰コストは1回あたり約1秒であり、これは回数に比例する固定費。
+1時間で中断5回なら 5/3600 = 99.9% となり、受け入れ基準（30分以上で95%以上）は満たせる見込み。
+
+中断4回に対しセグメント3本なのは、4回目の中断が終了通知と重なったためと解釈できる。
+クリップ 0/0 はスイングしていないため。
+
+### 2. アノテーション画面のテストケース列挙
+
+全32件（A事前条件2 / B選別13 / Cタイムライン8 / D書き出し5 / E永続化2 / F回帰2）。
+判定とメモを保存できるチェックリストを Artifact として作成した。
+https://claude.ai/code/artifact/93b57a54-670e-4cc5-9d22-f3c0be210d2e
+
+コード読解で判明し、テスト前に共有すべき点:
+
+- **候補は 3g 超の区間からしか作られない**。振っていないセッションでは選別画面が空になる。
+  テスト前に Watch を着けた腕を1秒以上あけて10回ほど振る必要がある
+- セッション一覧は**録画セッション基準**（`videoStore.sessions`）。iPhone 側で録画していない
+  セッションは、連続記録が届いていても一覧に出ない
+- **時刻オフセット（F-I8-7）は書き出し時にしか適用されない**。
+  `SessionAnnotation.corrected` の呼び出し元は `confirmedEventsForExport` /
+  `rejectedEventsForExport` のみで、画面上のマーカーは動かない。
+  仕様の文言は満たすが「動画を見ながら補正量を決める」ことはできない
+
+### 3. dspec のトライアル導入
+
+`TennisAnalyser/docs/spec/` に仕様モデルを新設し、F-I7（6規則＋受け入れ基準）と
+F-I8（3規則＋受け入れ基準）の計11規則・15用語を定義した。
+`pnpm spec` で check / drift / coverage が通る状態。詳細は
+[docs/spec/README.md](../TennisAnalyser/docs/spec/README.md)。
+
+導入判断:
+
+- **dspec は npm 未公開**（`@mizchi/dspec` は 404）。GitHub から devDependency として取得した
+- Nix devShell は Lean・Z3・TLA+・Alloy まで含むが、**今回は使わない**。
+  必要なのは Pkl と Node のみで、形式手法のバックエンドは Swift から使えないため。
+  Pkl は `brew install pkl`（0.32.1）で入れた
+- 仕様書は Pkl へ移行**しない**。散文は「なぜそう決めたか」の記録であり機械検証の対象外。
+  モデルには id・実装参照・用語だけを持たせ、二重管理の範囲を最小にした
+
+### 4. pre-commit フックへの組み込み
+
+`.githooks/pre-commit` を新設し、`git config core.hooksPath .githooks` で有効化した。
+
+実行するのは `dspec coverage` の1コマンドのみ。`validateCoverage` が `validateDrift` を、
+`validateDrift` が `validate(model)` を呼ぶ構造のため、check / drift / coverage を
+個別に走らせる必要がない。`pnpm spec`（3プロセス）が 3.7秒なのに対し 0.23秒。
+
+`VideoStore` を改名したモデルでコミットが止まること、復元すると通ることを確認した。
+
+設計判断:
+
+- **ツールチェーンが無い環境では通過させる**（通知のみ）。トライアル中の道具のために
+  別端末でのコミットを妨げないため。参照切れそのものは止める
+- **PATH をフック内で補う**。node が mise shims 経由（`~/.local/share/mise/shims/node`）で
+  あり、Xcode の Source Control から commit するとログインシェルの PATH が引き継がれない
+- `core.hooksPath` は clone に含まれないため `pnpm hooks:install` を用意した
+
+## 実装から得た知見
+
+- **pnpm 経由では `dspec` コマンドが無言で終了する**。`src/cli.mjs` の実行判定が
+  `resolve(process.argv[1]) === fileURLToPath(import.meta.url)` であり、
+  pnpm のシンボリックリンク構成では一致しない。**何も出力せず終了コード 0** を返すため
+  成功と区別がつかない。`node --preserve-symlinks-main` 経由の起動で回避した
+- dspec のシンボル検査は `function|class|typealias|const|let|var` の正規表現であり、
+  Swift の `struct` / `enum` / `func` は一致しない。`class` 宣言のみシンボル付きで参照し、
+  それ以外はパスのみで参照する方針とした。改名検知が効くことは
+  `PracticeVideoRecorder` を改名したモデルで確認済み
+- `checks` のバックエンドに XCTest / swift-testing が無い。`manual` は drift で常にエラーになる。
+  Swift のテストは `implementedBy` の `kind = "test"` として存在検査だけを受けている
+- モデルの実装参照 path は**カレントディレクトリ基準**で解決される。
+  リポジトリルートから実行する必要がある
+- Pkl のモジュール先頭コメントを `///` で書くと、直後の `import` に doc comment が
+  付いたと解釈されてエラーになる。`//` を使う
+
+## ネクストアクション
+
+1. **アノテーション画面の実機テスト（32件）** — 上記チェックリストで実施。未着手
+2. **F-I7 の本番検証** — 次回のテニス後。30分以上でカバー率95%以上を確認する
+3. dspec の継続判断 — トライアルの評価。実装ファイルを動かしたときに drift が
+   役に立ったかで判断する。不要なら `package.json`・`node_modules`・`docs/spec/` の削除で戻せる
+4. Xcode GUI ビルドの確認（AGENTS.md ルール5、W6 から持ち越し）
