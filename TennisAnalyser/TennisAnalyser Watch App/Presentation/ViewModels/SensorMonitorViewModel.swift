@@ -16,6 +16,11 @@ struct AxisTrace: Equatable {
 
     var isEmpty: Bool { x.isEmpty }
 
+    /// 3軸を通した絶対値の最大。縦軸スケールの決定に使う
+    var peakMagnitude: Double {
+        [x, y, z].compactMap { $0.lazy.map(abs).max() }.max() ?? 0
+    }
+
     /// 末尾へ1点ずつ追加し、`capacity` を超えた古い点を捨てる
     mutating func append(x newX: Double, y newY: Double, z newZ: Double, capacity: Int) {
         x.append(newX)
@@ -30,11 +35,61 @@ struct AxisTrace: Equatable {
     }
 }
 
+// MARK: - 縦軸スケール
+
+/// 波形の縦軸スケール
+///
+/// **調整するのはここ。** 表示中の波形の最大振幅に合わせて自動で決まる。
+/// 下限は 2026-07-21 の実測分布に基づき、通常の素振りが収まる範囲を残した
+/// （合成加速度の中央値 7g・p90 22g。軸ごとに分けると通常の素振りは ±4g 前後）。
+/// 上限は設けない。振り切れた波形を見せないことを優先する。
+enum SensorChartScale {
+    /// 加速度の下限 (±g)
+    static let accelerationMinimum: Double = 4
+    /// 角速度の下限 (±°/s)
+    static let rotationMinimum: Double = 500
+
+    /// 最大振幅に対する余白。線が枠へ張り付いて見えるのを避ける
+    private static let headroom: Double = 1.15
+
+    /// 切り上げ先の候補（10の冪との積で 1・2・5・10・20・50… の梯子になる）
+    private static let steps: [Double] = [1, 2, 5]
+
+    /// 最大振幅に合う縦軸スケールを返す
+    ///
+    /// Why not 振幅へ連続的に追従させる: 目盛りが常時わずかに伸縮し、
+    /// 波形が呼吸しているように見えて動きの大小が読めなくなる。
+    /// 1・2・5 の梯子へ切り上げ、段が変わるときだけ目盛りを動かす。
+    ///
+    /// - Parameters:
+    ///   - peak: 表示中の波形の絶対値の最大
+    ///   - minimum: これ以上は縮めない下限
+    static func fit(peak: Double, minimum: Double) -> Double {
+        let required = peak * headroom
+        guard required.isFinite, required > minimum else { return minimum }
+
+        let decade = pow(10, floor(log10(required)))
+        for step in steps where step * decade >= required {
+            return max(step * decade, minimum)
+        }
+        return max(10 * decade, minimum)
+    }
+
+    static func accelerationLabel(_ scale: Double) -> String {
+        String(format: "±%.0fg", scale)
+    }
+
+    static func rotationLabel(_ scale: Double) -> String {
+        String(format: "±%.0f", scale)
+    }
+}
+
 /// センサー値を軸ごとの時系列としてリアルタイムに流す ViewModel
 ///
 /// 責務:
 /// - `MotionSensorRepository` から届くサンプルを軸ごとの時系列として保持する
 /// - 画面更新を一定間隔へ間引く（サンプル到着ごとの再描画を避ける）
+/// - 表示中の波形に合う縦軸スケールを決める
 /// - 実測サンプリングレートを1秒窓で算出する
 ///
 /// 保存も転送も行わない。画面を開いている間だけ動く。
@@ -47,6 +102,10 @@ final class SensorMonitorViewModel: ObservableObject {
     @Published private(set) var accelerationTrace = AxisTrace()
     /// 角速度3軸の時系列 (°/s)
     @Published private(set) var rotationTrace = AxisTrace()
+    /// 加速度の縦軸スケール (±g)。表示中の波形に合わせて自動で決まる
+    @Published private(set) var accelerationScale = SensorChartScale.accelerationMinimum
+    /// 角速度の縦軸スケール (±°/s)。表示中の波形に合わせて自動で決まる
+    @Published private(set) var rotationScale = SensorChartScale.rotationMinimum
     /// 最新サンプル。数値表示に使う
     @Published private(set) var latest: MotionSample?
     /// 直近1秒の実測サンプリングレート (Hz)
@@ -153,6 +212,8 @@ final class SensorMonitorViewModel: ObservableObject {
     private func reset() {
         accelerationTrace = AxisTrace()
         rotationTrace = AxisTrace()
+        accelerationScale = SensorChartScale.accelerationMinimum
+        rotationScale = SensorChartScale.rotationMinimum
         bufferedAcceleration = AxisTrace()
         bufferedRotation = AxisTrace()
         latest = nil
@@ -183,6 +244,17 @@ final class SensorMonitorViewModel: ObservableObject {
         accelerationTrace = bufferedAcceleration
         rotationTrace = bufferedRotation
         latest = last
+
+        // Why not ピークを別に保持して時間で減衰させる: 時系列は3秒で入れ替わるため、
+        // 表示中の点だけを見れば大きな山が画面から消えた時点でスケールも下がる。
+        accelerationScale = SensorChartScale.fit(
+            peak: bufferedAcceleration.peakMagnitude,
+            minimum: SensorChartScale.accelerationMinimum
+        )
+        rotationScale = SensorChartScale.fit(
+            peak: bufferedRotation.peakMagnitude,
+            minimum: SensorChartScale.rotationMinimum
+        )
 
         // 実測Hz は1秒窓で確定させる。窓が短いと1サンプルの増減で値が跳ねて読めない
         let windowSeconds = now.timeIntervalSince(windowStartedAt)

@@ -13,8 +13,6 @@ struct SensorMonitorView: View {
 
     @StateObject private var viewModel: SensorMonitorViewModel
     @State private var isAlertPresented = false
-    @State private var accelerationScaleIndex = SensorChartScale.defaultAccelerationIndex
-    @State private var rotationScaleIndex = SensorChartScale.defaultRotationIndex
 
     /// - Parameter viewModel: プレビューやテストで差し替える場合に指定する
     ///
@@ -32,27 +30,21 @@ struct SensorMonitorView: View {
                     title: "加速度",
                     unit: "g",
                     trace: viewModel.accelerationTrace,
-                    scale: SensorChartScale.acceleration[accelerationScaleIndex],
-                    scaleLabel: SensorChartScale.accelerationLabel(accelerationScaleIndex),
+                    scale: viewModel.accelerationScale,
+                    scaleLabel: SensorChartScale.accelerationLabel(viewModel.accelerationScale),
                     format: "%+.2f",
                     values: (viewModel.latest?.accX, viewModel.latest?.accY, viewModel.latest?.accZ)
-                ) {
-                    accelerationScaleIndex =
-                        (accelerationScaleIndex + 1) % SensorChartScale.acceleration.count
-                }
+                )
 
                 traceSection(
                     title: "角速度",
                     unit: "°/s",
                     trace: viewModel.rotationTrace,
-                    scale: SensorChartScale.rotation[rotationScaleIndex],
-                    scaleLabel: SensorChartScale.rotationLabel(rotationScaleIndex),
+                    scale: viewModel.rotationScale,
+                    scaleLabel: SensorChartScale.rotationLabel(viewModel.rotationScale),
                     format: "%+.0f",
                     values: (viewModel.latest?.gyroX, viewModel.latest?.gyroY, viewModel.latest?.gyroZ)
-                ) {
-                    rotationScaleIndex =
-                        (rotationScaleIndex + 1) % SensorChartScale.rotation.count
-                }
+                )
 
                 footer
             }
@@ -80,8 +72,7 @@ struct SensorMonitorView: View {
         scale: Double,
         scaleLabel: String,
         format: String,
-        values: (Double?, Double?, Double?),
-        onCycleScale: @escaping () -> Void
+        values: (Double?, Double?, Double?)
     ) -> some View {
         VStack(spacing: 3) {
             HStack(spacing: 4) {
@@ -92,13 +83,11 @@ struct SensorMonitorView: View {
                     .font(.system(size: 9))
                     .foregroundStyle(.gray)
                 Spacer()
-                // 実機で見ながら合わせられるよう、タップでスケールを循環させる
-                Button(action: onCycleScale) {
-                    Text(scaleLabel)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.blue)
-                }
-                .buttonStyle(.plain)
+                // 目盛りが動くため、いま何倍で見ているかを常に添える
+                Text(scaleLabel)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.blue)
+                    .animation(.default, value: scaleLabel)
             }
 
             AxisTraceChart(trace: trace, scale: scale, capacity: viewModel.traceCapacity)
@@ -153,30 +142,7 @@ struct SensorMonitorView: View {
     }
 }
 
-// MARK: - 縦軸スケール
-
-/// 波形の縦軸スケール
-///
-/// **調整するのはここ。** 既定値は 2026-07-21 の実測分布に合わせている
-/// （合成加速度の中央値 7g・p90 22g。軸ごとに分けると通常の素振りは ±8g に収まる）。
-/// 画面上のラベルをタップすると候補を循環するので、実機で見ながら選べる。
-enum SensorChartScale {
-    /// 加速度の縦軸候補 (±g)
-    static let acceleration: [Double] = [4, 8, 16]
-    /// 角速度の縦軸候補 (±°/s)
-    static let rotation: [Double] = [500, 1000, 2000]
-
-    static let defaultAccelerationIndex = 1
-    static let defaultRotationIndex = 1
-
-    static func accelerationLabel(_ index: Int) -> String {
-        String(format: "±%.0fg", acceleration[index])
-    }
-
-    static func rotationLabel(_ index: Int) -> String {
-        String(format: "±%.0f", rotation[index])
-    }
-}
+// MARK: - 軸の色
 
 /// 軸の色。X/Y/Z を通して同じ対応にする
 enum SensorAxisColor {
@@ -293,10 +259,14 @@ private struct MockedSensorMonitorPreview: View {
             capacity: capacity
         )
     }
+    // 上は自動スケール適用後、下は下限のまま（振り切れた見え方の比較用）
+    let fitted = SensorChartScale.fit(
+        peak: trace.peakMagnitude, minimum: SensorChartScale.accelerationMinimum
+    )
     return VStack {
-        AxisTraceChart(trace: trace, scale: 8, capacity: capacity)
+        AxisTraceChart(trace: trace, scale: fitted, capacity: capacity)
             .frame(height: 58)
-        AxisTraceChart(trace: trace, scale: 4, capacity: capacity)
+        AxisTraceChart(trace: trace, scale: SensorChartScale.accelerationMinimum, capacity: capacity)
             .frame(height: 58)
     }
     .padding(6)

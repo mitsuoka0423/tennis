@@ -118,6 +118,71 @@ struct SensorMonitorViewModelTests {
         #expect(viewModel.latest == nil)
     }
 
+    // MARK: - 縦軸スケール
+
+    // 正常系: 振幅が下限に収まる間は縦軸スケールが下限のままであること
+    @Test func scaleStaysAtMinimumForSmallAmplitude() async throws {
+        let repository = FakeMotionSensorRepository()
+        let viewModel = SensorMonitorViewModel(repository: repository)
+        viewModel.start()
+        #expect(await waitUntil { repository.isStreaming })
+
+        repository.emit([sample(accX: 1.0, gyroX: 100)])
+
+        #expect(await waitUntil { !viewModel.accelerationTrace.isEmpty })
+        #expect(viewModel.accelerationScale == SensorChartScale.accelerationMinimum)
+        #expect(viewModel.rotationScale == SensorChartScale.rotationMinimum)
+    }
+
+    // 正常系: 下限を超える振幅が届くと縦軸スケールが広がること
+    @Test func scaleGrowsWithAmplitude() async throws {
+        let repository = FakeMotionSensorRepository()
+        let viewModel = SensorMonitorViewModel(repository: repository)
+        viewModel.start()
+        #expect(await waitUntil { repository.isStreaming })
+
+        repository.emit([sample(accX: -10, gyroX: 1200)])
+
+        #expect(await waitUntil { viewModel.accelerationScale == 20 })
+        #expect(viewModel.rotationScale == 2000)
+    }
+
+    // 正常系: 大きな振幅が表示範囲から流れ去ると縦軸スケールが下限へ戻ること
+    @Test func scaleShrinksAfterPeakLeavesWindow() async throws {
+        let repository = FakeMotionSensorRepository()
+        let viewModel = SensorMonitorViewModel(repository: repository)
+        viewModel.start()
+        #expect(await waitUntil { repository.isStreaming })
+        repository.emit([sample(accX: 10)])
+        #expect(await waitUntil { viewModel.accelerationScale == 20 })
+
+        // 表示更新の間引き明けに、保持点数ぶんの小さな値で押し出す
+        try await Task.sleep(nanoseconds: 100_000_000)
+        repository.emit((0..<viewModel.traceCapacity).map { _ in sample(accX: 0.5) })
+
+        #expect(
+            await waitUntil {
+                viewModel.accelerationScale == SensorChartScale.accelerationMinimum
+            }
+        )
+    }
+
+    // 正常系: 停止後に再開すると縦軸スケールが下限へ戻ること
+    @Test func restartResetsScale() async throws {
+        let repository = FakeMotionSensorRepository()
+        let viewModel = SensorMonitorViewModel(repository: repository)
+        viewModel.start()
+        #expect(await waitUntil { repository.isStreaming })
+        repository.emit([sample(accX: 10)])
+        #expect(await waitUntil { viewModel.accelerationScale == 20 })
+
+        viewModel.stop()
+        viewModel.start()
+
+        #expect(viewModel.accelerationScale == SensorChartScale.accelerationMinimum)
+        #expect(viewModel.rotationScale == SensorChartScale.rotationMinimum)
+    }
+
     // MARK: - Helpers
 
     private func sample(
@@ -143,6 +208,37 @@ struct SensorMonitorViewModelTests {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
         return condition()
+    }
+}
+
+// MARK: - 縦軸スケールの算出
+
+struct SensorChartScaleTests {
+
+    // 正常系: 振幅が下限に収まる場合は下限を返すこと（波形が無い場合を含む）
+    @Test func returnsMinimumForSmallPeak() {
+        #expect(SensorChartScale.fit(peak: 0, minimum: 4) == 4)
+        #expect(SensorChartScale.fit(peak: 3.4, minimum: 4) == 4)
+    }
+
+    // 正常系: 1・2・5 の梯子へ切り上げること（余白 15% を含めて判定する）
+    @Test func roundsUpToLadder() {
+        #expect(SensorChartScale.fit(peak: 4.2, minimum: 4) == 5)
+        #expect(SensorChartScale.fit(peak: 6, minimum: 4) == 10)
+        #expect(SensorChartScale.fit(peak: 10, minimum: 4) == 20)
+        #expect(SensorChartScale.fit(peak: 1200, minimum: 500) == 2000)
+        #expect(SensorChartScale.fit(peak: 2000, minimum: 500) == 5000)
+    }
+
+    // 正常系: 上限を設けず、桁が増えても切り上げ先があること
+    @Test func hasNoUpperBound() {
+        #expect(SensorChartScale.fit(peak: 80_000, minimum: 500) == 100_000)
+    }
+
+    // 準正常系: 余白を足すと梯子の先頭を超える場合、次の桁へ繰り上がること
+    @Test func carriesToNextDecade() {
+        // 5.0 * 1.15 = 5.75 は 5 に収まらないため 10 へ上がる
+        #expect(SensorChartScale.fit(peak: 5, minimum: 4) == 10)
     }
 }
 
