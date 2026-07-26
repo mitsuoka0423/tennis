@@ -1,0 +1,25 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    devDependencies:
+      '@mizchi/dspec':
+        specifier: github:mizchi/dspec
+        version: https://codeload.github.com/mizchi/dspec/tar.gz/81360080346e46c4325162e39cb07195207c0b7e
+
+packages:
+
+  '@mizchi/dspec@https://codeload.github.com/mizchi/dspec/tar.gz/81360080346e46c4325162e39cb07195207c0b7e':
+    resolution: {gitHosted: true, integrity: sha512-G5w3TDZCmnRz46vs/6RklLdoGyDbRZ6J8bNR3m9Fag/25EjsSQSro0GORlmw/WCEjYiH1babM9X7Z4pMV5It5Q==, tarball: https://codeload.github.com/mizchi/dspec/tar.gz/81360080346e46c4325162e39cb07195207c0b7e}
+    version: 0.0.0
+    engines: {node: '>=24'}
+    hasBin: true
+
+snapshots:
+
+  '@mizchi/dspec@https://codeload.github.com/mizchi/dspec/tar.gz/81360080346e46c4325162e39cb07195207c0b7e': {}

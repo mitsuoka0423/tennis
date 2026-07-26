@@ -1,0 +1,22 @@
+{
+  "name": "tennis-analyser-spec",
+  "private": true,
+  "type": "module",
+  "description": "dspec による仕様検証ツールチェーン（アプリ本体は TennisAnalyser/ の Xcode プロジェクト）",
+  "scripts": {
+    "dspec": "node --preserve-symlinks-main node_modules/@mizchi/dspec/src/cli.mjs",
+    "spec:check": "pnpm dspec check TennisAnalyser/docs/spec/tennis.pkl",
+    "spec:drift": "pnpm dspec drift TennisAnalyser/docs/spec/tennis.pkl",
+    "spec:coverage": "pnpm dspec coverage TennisAnalyser/docs/spec/tennis.pkl",
+    "spec:render": "pnpm dspec render --locale ja TennisAnalyser/docs/spec/tennis.pkl",
+    "spec": "pnpm spec:check && pnpm spec:drift && pnpm spec:coverage",
+    "hooks:install": "git config core.hooksPath .githooks"
+  },
+  "devDependencies": {
+    "@mizchi/dspec": "github:mizchi/dspec"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@11.5.1"
+}

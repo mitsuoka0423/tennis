@@ -3,6 +3,8 @@
 **状態**: 実装済み・実機未検証（2026-07-25 作成 / 同日 W6 実装完了）
 **前提**: [RECORDING_RELIABILITY_SPEC.md](RECORDING_RELIABILITY_SPEC.md) 6章のデータ収集方針変更
 **実装計画**: W6（T14〜T17）
+**機械検証**: F-I8-2 / 9 / 10 と受け入れ基準は [仕様モデル](spec/README.md)（`spec/tennis.pkl`）にも定義があり、
+`pnpm spec` で実装参照の切れを検出する。本書を変更したらモデル側も更新すること。
 
 ---
 

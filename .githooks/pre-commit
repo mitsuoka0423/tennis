@@ -1,0 +1,44 @@
+#!/bin/sh
+#
+# 仕様モデルと実装の対応が壊れたままコミットされるのを防ぐ（dspec トライアル）
+#
+# 実行するのは `dspec coverage` の1コマンドのみ。coverage は内部で drift を、
+# drift は check を呼ぶため、3つを個別に走らせる必要がない（約0.2秒）。
+#
+# ツールチェーンが無い環境では**コミットを止めずに通知だけ**する。
+# トライアル中の道具のために、環境が整っていない端末でのコミットを妨げないため。
+#
+# 一時的に迂回する場合: git commit --no-verify
+
+set -e
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+model="TennisAnalyser/docs/spec/tennis.pkl"
+cli="node_modules/@mizchi/dspec/src/cli.mjs"
+
+# GUI クライアント（Xcode 等）からのコミットではログインシェルの PATH が引き継がれない
+PATH="$HOME/.local/share/mise/shims:$HOME/Library/pnpm:/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH
+
+skip() {
+  printf 'dspec: %s のため仕様チェックを飛ばしました\n' "$1" >&2
+  printf 'dspec: 復旧するには %s\n' "$2" >&2
+  exit 0
+}
+
+[ -f "$model" ] || skip "モデルが見つからない ($model)" "docs/spec/README.md を参照"
+[ -f "$cli" ] || skip "dspec が未導入" "pnpm install"
+command -v node >/dev/null 2>&1 || skip "node が PATH に無い" "Node.js 24 以上を導入"
+command -v pkl >/dev/null 2>&1 || skip "pkl が PATH に無い" "brew install pkl"
+
+# --preserve-symlinks-main が無いと、pnpm のシンボリックリンク構成では
+# cli.mjs の実行判定が一致せず、何も出力せず終了コード 0 を返す（成功と区別できない）
+if ! node --preserve-symlinks-main "$cli" coverage "$model"; then
+  printf '\n'
+  printf 'dspec: 仕様モデルと実装の対応が取れていません。\n' >&2
+  printf 'dspec: 実装を動かした場合は %s の implementedBy を更新してください。\n' "$model" >&2
+  printf 'dspec: 意図的に先へ進む場合は git commit --no-verify\n' >&2
+  exit 1
+fi

@@ -5,6 +5,8 @@
 動画クリップが 325件中 1件しか生成されなかった。本仕様はその是正を定義する。
 
 関連: [F-I6 動画同期](REQUIREMENTS.md#f-i6)・[Phase 5 実装計画](plans/PHASE5_VIDEO_SYNC_PLAN.md)
+機械検証: F-I7-1〜6 と受け入れ基準は [仕様モデル](spec/README.md)（`spec/tennis.pkl`）にも定義があり、
+`pnpm spec` で実装参照の切れを検出する。本書を変更したらモデル側も更新すること。
 
 ---
 

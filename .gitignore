@@ -9,3 +9,6 @@ DerivedData/
 
 # macOS
 .DS_Store
+
+# dspec（仕様検証ツールチェーン）
+node_modules/

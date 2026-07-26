@@ -1,0 +1,426 @@
+// TennisAnalyser の仕様モデル（dspec トライアル）
+//
+// 対象は F-I7（録画継続性）と F-I8（アノテーション）の中核規則。
+// 自然言語の仕様書は docs/RECORDING_RELIABILITY_SPEC.md と docs/ANNOTATION_SPEC.md にあり、
+// 本ファイルはそこから「実装参照を伴う検証可能な主張」だけを取り出したもの。
+//
+// 実行はリポジトリルートから行う。実装参照 (`implementedBy`) の path は
+// モデルファイルではなく **カレントディレクトリ** を基準に解決されるため。
+//
+//     pnpm spec
+//
+// Why not 仕様書を Pkl へ全面移行する: 仕様書は「なぜそう決めたか」の記録であり、
+// 散文の分量が主体で機械検証の対象にならない。dspec には id・実装参照・
+// 用語の一貫性という機械が判定できる部分だけを持たせ、二重管理の範囲を最小にする。
+import "../../../node_modules/@mizchi/dspec/dspec/Schema.pkl" as d
+
+model: d.Model = new {
+  id = "tennis-analyser"
+  name = d.text("TennisAnalyser 仕様", "TennisAnalyser specification")
+  version = "0.1.0"
+  primaryLocale = "ja"
+  locales {
+    "ja"
+    "en"
+  }
+
+  // ---------------------------------------------------------------- 用語
+
+  vocabulary {
+    d.term("session.practice", "entity", "練習セッション", "practice session")
+    d.term("recording.session", "entity", "録画セッション", "recording session")
+    d.term("recording.segment", "entity", "録画セグメント", "recording segment")
+    d.term("sensor.chunk", "entity", "センサー記録チャンク", "continuous sensor chunk")
+    d.term("annotation.event", "entity", "アノテーションイベント", "annotated event")
+    d.term("video.clip", "entity", "スイングクリップ", "swing clip")
+    d.term("diagnostics.record", "entity", "セッション診断記録", "session diagnostics record")
+
+    d.term("event.interrupted", "event", "録画の中断", "recording interruption")
+    d.term("event.resumed", "event", "録画の再開", "recording resumption")
+    d.term("event.session_ended", "event", "セッションの終了", "session end")
+
+    d.term("state.session_active", "state", "セッション継続中", "session is active")
+    d.term("state.recording", "state", "録画中", "recording in progress")
+
+    d.term("metric.coverage_rate", "quantity", "録画カバー率", "recording coverage rate")
+    d.term("metric.review_throughput", "quantity", "選別スループット", "review throughput")
+
+    (d.term("status.rejected", "state", "却下", "rejected")) {
+      aliases {
+        ["ja"] = new { "却下"; "負例" }
+        ["en"] = new { "rejected"; "negative example" }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- 規則
+
+  rules {
+
+    // ============================ F-I7 録画継続性 ============================
+
+    new d.Rule {
+      id = "F-I7-1"
+      kind = "obligation"
+      text =
+        d.text(
+          "セッション中は iPhone を操作しなくても録画が継続する",
+          "Recording continues without any interaction with the iPhone during a session",
+        )
+      terms {
+        "state.session_active"
+        "state.recording"
+      }
+      `when` {
+        d.clause("session.active", "セッションが継続している", "the session is active")
+      }
+      must {
+        d.clause("recording.continues", "録画が継続している", "recording is in progress")
+        d.clause("idle_timer.disabled", "画面の自動ロックが抑止されている", "the idle timer is disabled")
+      }
+      rationale = "2026-07-21 の実練習で自動ロックにより録画が開始4〜29秒で停止し、325件中1件しかクリップ化できなかった。"
+      reviewStatus = "review"
+      implementedBy {
+        d.codeRef("TennisAnalyser/TennisAnalyser/Infrastructure/PracticeVideoRecorder.swift", "PracticeVideoRecorder")
+      }
+    }
+
+    new d.Rule {
+      id = "F-I7-2"
+      kind = "obligation"
+      text =
+        d.text(
+          "中断が解消した時点で録画を自動的に再開する",
+          "Recording resumes automatically once the interruption ends",
+        )
+      terms {
+        "event.interrupted"
+        "event.resumed"
+        "state.session_active"
+      }
+      `when` {
+        d.clause("recording.interrupted", "録画が中断された", "recording was interrupted")
+        d.clause("session.active", "セッションが継続している", "the session is still active")
+      }
+      must {
+        d.clause("recording.resumed", "ユーザー操作なしに録画が再開される", "recording resumes without user interaction")
+      }
+      // Why not 中断させない: カメラを継続できるバックグラウンドモードは iOS に存在しない
+      rationale = "AVCaptureSession はバックグラウンド遷移で OS により必ず停止されるため、防ぐのではなく復帰する設計とした。"
+      reviewStatus = "review"
+      implementedBy {
+        d.codeRef("TennisAnalyser/TennisAnalyser/Infrastructure/PracticeVideoRecorder.swift", "PracticeVideoRecorder")
+        new d.ImplementationRef {
+          kind = "test"
+          path = "TennisAnalyser/TennisAnalyserTests/RecordingSessionTests.swift"
+        }
+      }
+    }
+
+    new d.Rule {
+      id = "F-I7-3"
+      kind = "invariant"
+      text =
+        d.text(
+          "1セッションの録画は複数のセグメントに分割して保持される",
+          "One session's recording is retained as multiple segments",
+        )
+      terms {
+        "recording.session"
+        "recording.segment"
+      }
+      must {
+        d.clause("segment.per_resumption", "中断・復帰のたびに新しいセグメントが始まる", "a new segment starts on every resumption")
+        d.clause("segment.max_duration", "1セグメントの長さは上限（既定10分）を超えない", "no segment exceeds the maximum duration")
+      }
+      rationale = "既存の .mov へ追記する API が AVCaptureMovieFileOutput に無く、57分の 1080p は1ファイル4〜6GBに達して破損が全損に直結する。"
+      reviewStatus = "review"
+      implementedBy {
+        new d.ImplementationRef {
+          kind = "code"
+          path = "TennisAnalyser/TennisAnalyser/Domain/RecordingSession.swift"
+        }
+        new d.ImplementationRef {
+          kind = "test"
+          path = "TennisAnalyser/TennisAnalyserTests/RecordingSessionTests.swift"
+        }
+      }
+    }
+
+    new d.Rule {
+      id = "F-I7-4"
+      kind = "prohibition"
+      text =
+        d.text(
+          "録画セグメントを自動削除しない",
+          "Recording segments are never deleted automatically",
+        )
+      terms {
+        "recording.segment"
+        "event.session_ended"
+      }
+      `when` {
+        d.clause("session.ended", "セッションが終了した", "the session has ended")
+      }
+      mustNot {
+        d.clause("segment.auto_deleted", "セグメントが自動で削除される", "segments are deleted automatically")
+      }
+      // Why not 保持期間の上限: ラベル付けは練習後にまとめて行うため、期限切れは素材ごと失う
+      rationale = "データ収集方針の変更（2026-07-25）でセグメントは中間データではなく一次データになった。クリップは何度でも再生成できる派生データ。"
+      reviewStatus = "review"
+      implementedBy {
+        d.codeRef("TennisAnalyser/TennisAnalyser/Infrastructure/VideoStore.swift", "VideoStore")
+      }
+    }
+
+    new d.Rule {
+      id = "F-I7-5"
+      kind = "obligation"
+      text =
+        d.text(
+          "セッションごとに診断記録を残し、Appから閲覧できる",
+          "Diagnostics are recorded per session and can be reviewed in the app",
+        )
+      terms {
+        "diagnostics.record"
+        "metric.coverage_rate"
+      }
+      must {
+        d.clause("diagnostics.segments", "セグメント数と各セグメントの終了理由が記録される", "segment count and end reasons are recorded")
+        d.clause("diagnostics.interruptions", "中断の発生回数が記録される", "the number of interruptions is recorded")
+        d.clause("diagnostics.clip_results", "クリップ生成の成否と理由が記録される", "clip generation results and reasons are recorded")
+        d.clause("diagnostics.coverage", "録画総時間とセッション総時間の比が算出できる", "the coverage rate can be derived")
+      }
+      rationale = "実機検証は1時間の実練習を要し再現コストが高い。1回の検証から最大限の情報を得る必要がある。"
+      reviewStatus = "review"
+      implementedBy {
+        new d.ImplementationRef {
+          kind = "code"
+          path = "TennisAnalyser/TennisAnalyser/Domain/SessionDiagnostics.swift"
+        }
+        d.codeRef("TennisAnalyser/TennisAnalyser/Infrastructure/DiagnosticsStore.swift", "DiagnosticsStore")
+        new d.ImplementationRef {
+          kind = "test"
+          path = "TennisAnalyser/TennisAnalyserTests/SessionDiagnosticsTests.swift"
+        }
+      }
+    }
+
+    new d.Rule {
+      id = "F-I7-6"
+      kind = "obligation"
+      text =
+        d.text(
+          "Mac に接続していなくても録画の開始・中断・復帰・停止を後から追跡できる",
+          "Recording start, interruption, resumption, and stop remain traceable without a Mac attached",
+        )
+      terms {
+        "event.interrupted"
+        "event.resumed"
+      }
+      must {
+        d.clause("log.os_logger", "ログが os.Logger で出力される", "logs are emitted through os.Logger")
+      }
+      rationale = "print は Xcode をアタッチしている時のみ stdout に出るため、実練習中のログが1行も残っていなかった。"
+      reviewStatus = "review"
+      implementedBy {
+        new d.ImplementationRef {
+          kind = "code"
+          path = "TennisAnalyser/TennisAnalyser/Infrastructure/AppLog.swift"
+        }
+      }
+    }
+
+    new d.Rule {
+      id = "F-I7-ACC-1"
+      kind = "invariant"
+      text =
+        d.text(
+          "30分以上のセッションで録画カバー率が95%以上である",
+          "Recording coverage is at least 95% for sessions of 30 minutes or longer",
+        )
+      terms {
+        "metric.coverage_rate"
+        "session.practice"
+      }
+      `when` {
+        d.clause("session.duration >= 30min", "セッションが30分以上である", "the session lasts 30 minutes or longer")
+      }
+      must {
+        d.clause("coverage_rate >= 0.95", "録画カバー率が95%以上である", "the coverage rate is at least 95%")
+      }
+      // 実機検証が完了するまで approved に上げない
+      reviewStatus = "draft"
+      implementedBy {
+        new d.ImplementationRef {
+          kind = "doc"
+          path = "TennisAnalyser/docs/RECORDING_RELIABILITY_SPEC.md"
+        }
+      }
+    }
+
+    // ========================== F-I8 アノテーション ==========================
+
+    new d.Rule {
+      id = "F-I8-2"
+      kind = "obligation"
+      text =
+        d.text(
+          "承認と球種指定を1操作で完了できる",
+          "Approval and shot classification complete in a single action",
+        )
+      terms {
+        "annotation.event"
+        "metric.review_throughput"
+      }
+      `when` {
+        d.clause("candidate.presented", "候補が提示されている", "a candidate is presented")
+      }
+      must {
+        d.clause("confirm.single_action", "1タップで承認と球種指定が完了する", "one tap confirms and classifies")
+      }
+      rationale = "1時間の練習で約325件。1件10秒かかると練習と同じ時間のタグ付けを要し運用が破綻する。"
+      reviewStatus = "review"
+      implementedBy {
+        new d.ImplementationRef {
+          kind = "code"
+          path = "TennisAnalyser/TennisAnalyser/Presentation/AnnotationReviewView.swift"
+        }
+        new d.ImplementationRef {
+          kind = "code"
+          path = "TennisAnalyser/TennisAnalyser/Domain/SessionAnnotation.swift"
+        }
+        new d.ImplementationRef {
+          kind = "test"
+          path = "TennisAnalyser/TennisAnalyserTests/SessionAnnotationTests.swift"
+        }
+      }
+    }
+
+    new d.Rule {
+      id = "F-I8-10"
+      kind = "prohibition"
+      text =
+        d.text(
+          "却下したイベントを削除しない",
+          "Rejected events are never discarded",
+        )
+      terms {
+        "status.rejected"
+        "annotation.event"
+      }
+      mustNot {
+        d.clause("rejected.deleted", "却下が削除される", "rejected events are deleted")
+      }
+      // Why not 削除: 却下は「検知器がここで誤発火した」という負例であり、検知器改善の情報を持つ
+      rationale = "削除すると同じ誤検知を何度も却下し直すことになる。再検知時も人の判断を保持してマージする。"
+      reviewStatus = "review"
+      implementedBy {
+        new d.ImplementationRef {
+          kind = "code"
+          path = "TennisAnalyser/TennisAnalyser/Domain/SessionAnnotation.swift"
+        }
+        new d.ImplementationRef {
+          kind = "test"
+          path = "TennisAnalyser/TennisAnalyserTests/SessionAnnotationTests.swift"
+        }
+      }
+    }
+
+    new d.Rule {
+      id = "F-I8-9"
+      kind = "obligation"
+      text =
+        d.text(
+          "窓長を書き出し時に指定でき、再収集も再タグ付けも要らない",
+          "The window length is chosen at export time, requiring neither re-collection nor re-tagging",
+        )
+      terms {
+        "sensor.chunk"
+        "annotation.event"
+      }
+      `when` {
+        d.clause("export.requested", "書き出しが要求される", "an export is requested")
+      }
+      must {
+        d.clause("window.parameterized", "窓長を指定して切り出せる", "the window length is a parameter of the export")
+      }
+      rationale = "連続記録方式の主要な利点。窓長を変えて学習し直す際に実練習の再収集が不要になる。"
+      reviewStatus = "review"
+      implementedBy {
+        new d.ImplementationRef {
+          kind = "code"
+          path = "TennisAnalyser/TennisAnalyser/Infrastructure/AnnotationExporter.swift"
+        }
+        new d.ImplementationRef {
+          kind = "test"
+          path = "TennisAnalyser/TennisAnalyserTests/AnnotationExporterTests.swift"
+        }
+      }
+    }
+
+    new d.Rule {
+      id = "F-I8-ACC-1"
+      kind = "invariant"
+      text =
+        d.text(
+          "325件規模のセッションを20分以内に選別できる",
+          "A session of about 325 candidates can be reviewed within 20 minutes",
+        )
+      terms {
+        "metric.review_throughput"
+      }
+      must {
+        d.clause("throughput <= 3.7s", "1件あたり平均3.7秒以下で選別できる", "average review time is at most 3.7 seconds per candidate")
+      }
+      // 実機・実データでの計測が未実施
+      reviewStatus = "draft"
+      implementedBy {
+        new d.ImplementationRef {
+          kind = "doc"
+          path = "TennisAnalyser/docs/ANNOTATION_SPEC.md"
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- 決定
+
+  decisions {
+    new d.Decision {
+      id = "ADR-0001"
+      date = "2026-07-25"
+      summary =
+        d.text(
+          "撮影時に切り出さず、全区間を記録して練習後にタグ付けする",
+          "Record everything and tag afterwards instead of cutting at capture time",
+        )
+      rationale = "検知器の判断が撮影時に確定すると後から取り消せない。re-arm の2秒で 3g超イベントの42%が未発行だった。閾値・窓長を事後に変更できる状態にする。"
+    }
+
+    new d.Decision {
+      id = "ADR-0002"
+      date = "2026-07-25"
+      summary =
+        d.text(
+          "録画セグメントを一次データとして保持する",
+          "Treat recording segments as primary data and retain them",
+        )
+      rationale = "クリップはセグメントから何度でも再生成できる派生データ。生成に失敗しても素材が残っていれば再試行できる。"
+      supersedes {
+        "ADR-0001"
+      }
+    }
+
+    new d.Decision {
+      id = "ADR-0003"
+      date = "2026-07-26"
+      summary =
+        d.text(
+          "仕様の機械検証部分を dspec のモデルとして持つ（トライアル）",
+          "Keep the machine-checkable part of the spec as a dspec model (trial)",
+        )
+      rationale = "散文の仕様書では実装ファイル名の変更に追随できず、参照切れが検知できない。id と実装参照だけを型付きモデルへ移し、drift として検出する。"
+    }
+  }
+}
