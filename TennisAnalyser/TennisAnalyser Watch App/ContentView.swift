@@ -13,9 +13,15 @@ struct ContentView: View {
     @StateObject private var viewModel: WorkoutViewModel
     @State private var isAlertPresented = false
 
-    init(workoutSessionManager: WorkoutSessionManager? = nil) {
+    /// - Parameters:
+    ///   - workoutSessionManager: HealthKit マネージャー。省略時はシミュレータ向けにモックを使う
+    ///   - viewModel: プレビューで計測中の表示を確認する場合に指定する
+    init(
+        workoutSessionManager: WorkoutSessionManager? = nil,
+        viewModel: WorkoutViewModel? = nil
+    ) {
         let useMock = ProcessInfo.processInfo.environment["SIMULATOR_DEVICE_NAME"] != nil
-        _viewModel = StateObject(wrappedValue: WorkoutViewModel(
+        _viewModel = StateObject(wrappedValue: viewModel ?? WorkoutViewModel(
             useMock: useMock,
             workoutSessionManager: workoutSessionManager
         ))
@@ -33,6 +39,15 @@ struct ContentView: View {
                 StandbyView(viewModel: viewModel)
             }
         }
+        .navigationTitle("計測")
+        .navigationBarTitleDisplayMode(.inline)
+        // 計測中はナビゲーションバーごと隠す
+        //
+        // 1. 離脱の禁止: 他画面のセンサー取得と並走すると 200Hz の計測レートへ影響しうる
+        // 2. 画面の高さの確保: 計測中の表示は停止ボタンが見切れない高さに詰めてあり
+        //    （W-1）、バーのぶん縮むと再び見切れる
+        .toolbar(isMeasuring ? .hidden : .visible, for: .navigationBar)
+        .navigationBarBackButtonHidden(isMeasuring)
         .alert("エラー", isPresented: $isAlertPresented) {
             Button("OK") { viewModel.clearError() }
         } message: {
@@ -41,6 +56,11 @@ struct ContentView: View {
         .onChange(of: viewModel.errorMessage) { _, newValue in
             isAlertPresented = newValue != nil
         }
+    }
+
+    /// 計測が動いている（開始処理中を含む）
+    private var isMeasuring: Bool {
+        viewModel.isRecording || viewModel.isStarting
     }
 }
 
@@ -82,12 +102,12 @@ private struct StandbyView: View {
             Spacer(minLength: 0)
 
             Image(systemName: "figure.tennis")
-                .font(.system(size: 36))
+                .font(.system(size: 32))
                 .foregroundStyle(.green)
 
-            Text("Tennis Analyser")
-                .font(.headline)
-                .foregroundStyle(.white)
+            Text("スイングを記録します")
+                .font(.system(size: 13))
+                .foregroundStyle(.gray)
 
             Spacer(minLength: 4)
 
@@ -217,6 +237,32 @@ private struct StatRow: View {
 
 // MARK: - Preview
 
-#Preview {
-    ContentView()
+#Preview("待機") {
+    // 実際の呼び出し元（RootView）と同じ NavigationStack の下で確認する
+    NavigationStack {
+        ContentView()
+    }
+}
+
+#Preview("計測中") {
+    RecordingStatePreview()
+}
+
+/// 計測中の表示を確認するためのプレビュー用ラッパー
+///
+/// 計測中は停止ボタンが見切れやすいため（W-1）、この状態を単体で見られるようにする。
+/// `useMock: true` なら HealthKit を経ずに計測状態へ入る。
+///
+/// Why not `#Preview` の中で直接 `start()` を呼ぶ: プレビューのコード変換
+/// （`__designTimeSelection`）が文と `return` の混在で解決に失敗し、
+/// ファイル全体のプレビューがビルドできなくなる。
+private struct RecordingStatePreview: View {
+    @StateObject private var viewModel = WorkoutViewModel(useMock: true)
+
+    var body: some View {
+        NavigationStack {
+            ContentView(viewModel: viewModel)
+        }
+        .task { viewModel.start() }
+    }
 }
