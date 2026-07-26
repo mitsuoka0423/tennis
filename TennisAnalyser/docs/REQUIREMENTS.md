@@ -102,6 +102,8 @@ watchOS 10以降で利用可能な高頻度モーションAPI（`CMBatchedSensor
 
 ### 5.1 watchOS 側
 
+画面・状態・操作の一覧と呼び名は [WATCH_SCREENS.md](WATCH_SCREENS.md) にある。
+
 * **[F-W1] ワークアウトセッション管理**
   * `HealthKit` を使用し、テニスのワークアウトセッションをアクティブ化・非アクティブ化できること。
 
