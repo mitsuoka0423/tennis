@@ -69,19 +69,20 @@ struct ContentView: View {
 /// 計測開始処理中（HealthKit 認可待ち・セッション確立中）の画面
 private struct StartingView: View {
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             ProgressView()
                 .progressViewStyle(.circular)
-                .tint(.green)
-                .scaleEffect(1.4)
+                .tint(GlassPalette.accent)
+                .frame(width: 56, height: 56)
+                .glassSurface(cornerRadius: 28)
 
             Text("準備中...")
-                .font(.headline)
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
 
             Text("ヘルスケアの許可が\n求められる場合があります")
-                .font(.caption2)
-                .foregroundStyle(.gray)
+                .font(.system(size: 11))
+                .foregroundStyle(GlassPalette.label)
                 .multilineTextAlignment(.center)
         }
         .padding()
@@ -92,34 +93,55 @@ private struct StartingView: View {
 
 /// 待機中の画面（開始ボタン）
 ///
-/// W-4: ボタンは RecordingView と同じ ActionButton + 同じコンテナ余白で
+/// W-4: ボタンは RecordingView と同じ `measureScreen` に載せ、
 /// 大きさ・位置を完全に揃える（画面切替時にボタンがずれない）
 private struct StandbyView: View {
     @ObservedObject var viewModel: WorkoutViewModel
 
     var body: some View {
-        VStack(spacing: 6) {
-            Spacer(minLength: 0)
+        MeasureScreen {
+            VStack(spacing: 8) {
+                Image(systemName: "figure.tennis")
+                    .font(.system(size: 24))
+                    .foregroundStyle(GlassPalette.accent)
+                    .frame(width: 56, height: 56)
+                    .glassSurface(cornerRadius: 28)
 
-            Image(systemName: "figure.tennis")
-                .font(.system(size: 32))
-                .foregroundStyle(.green)
-
-            Text("スイングを記録します")
-                .font(.system(size: 13))
-                .foregroundStyle(.gray)
-
-            Spacer(minLength: 4)
-
-            ActionButton(
-                title: "計測開始",
-                systemImage: "record.circle",
-                background: .green
-            ) {
+                Text("スイングを記録します")
+                    .font(.system(size: 12))
+                    .foregroundStyle(GlassPalette.label)
+            }
+        } action: {
+            GlassBarButton(title: "計測開始", glyph: .record, tint: GlassPalette.accent) {
                 viewModel.start()
             }
         }
-        .padding(.horizontal)
+    }
+}
+
+// MARK: - MeasureScreen
+
+/// 計測画面の共通の骨組み
+///
+/// **操作は必ず画面の下端に固定し、残りの高さへ内容を収める。**
+/// 待機と計測中でボタンの位置が動かないのは、両方がこの器に載っているため（W-4）。
+///
+/// Why not それぞれの画面で `VStack` + `Spacer` を組む: `Spacer` は親から
+/// 提案された高さが内容より小さいと縮まず、内容がはみ出したぶんだけ
+/// ボタンが安全領域の外へ押し出される。実機で停止ボタンが見切れた原因がこれ（W-1）。
+private struct MeasureScreen<Content: View, Action: View>: View {
+    @ViewBuilder let content: Content
+    @ViewBuilder let action: Action
+
+    var body: some View {
+        VStack(spacing: 6) {
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            action
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 10)
         .padding(.vertical, 6)
     }
 }
@@ -127,111 +149,85 @@ private struct StandbyView: View {
 // MARK: - RecordingView
 
 /// 計測中の画面（リアルタイム表示 + 停止ボタン）
+///
+/// 経過時間を中心に置き、レートの健全性はリングの弧で示す（カタログ 1g）。
+/// 動いている間に読むのは「まだ録れているか」だけなので、数値の一覧より
+/// 一目で欠けが分かる形を採る。
 private struct RecordingView: View {
     @ObservedObject var viewModel: WorkoutViewModel
 
     var body: some View {
-        // W-1: 停止ボタンの見切れ防止のため縦方向を圧縮
-        // （インジケーター+経過時間を1行、Hz+ロス率を1行に集約）
-        VStack(spacing: 6) {
-            // 計測インジケーター + 経過時間
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(.red)
-                    .frame(width: 8, height: 8)
-                Text(viewModel.elapsedTimeString)
-                    .font(.system(size: 28, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white)
+        MeasureScreen {
+            VStack(spacing: 6) {
+                // W-1: 高さが足りない機種・文字サイズではリングを一段小さくする。
+                // 縮むのはリングだけで、ボタンの位置は動かない
+                ViewThatFits(in: .vertical) {
+                    ring(diameter: 118, timeSize: 30)
+                    ring(diameter: 100, timeSize: 26)
+                    ring(diameter: 84, timeSize: 22)
+                }
+
+                Text(rateText)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(viewModel.measuredHz > 0 ? rateColor : GlassPalette.label)
             }
-
-            // スイング数(転送状況込み) / レート(Hz・ロス率)
-            VStack(spacing: 2) {
-                StatRow(
-                    label: "スイング",
-                    value: swingStatValue,
-                    valueColor: .green
-                )
-                StatRow(
-                    label: "レート",
-                    value: viewModel.measuredHz > 0
-                        ? String(format: "%.0fHz・%@", viewModel.measuredHz, viewModel.lossRateString)
-                        : "---",
-                    valueColor: viewModel.measuredHz > 0
-                        ? lossRateColor(viewModel.lossRate)
-                        : .white
-                )
-            }
-            .padding(.vertical, 2)
-
-            Spacer(minLength: 4)
-
-            ActionButton(
-                title: "停止・保存",
-                systemImage: "stop.circle",
-                background: .red
-            ) {
+        } action: {
+            GlassBarButton(title: "停止・保存", glyph: .stop, tint: GlassPalette.danger) {
                 viewModel.stop()
             }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 6)
     }
 
-    /// スイング数と転送状況の1行表示
+    /// 経過時間を囲むリング。弧の長さがレートの健全性を表す
+    private func ring(diameter: CGFloat, timeSize: CGFloat) -> some View {
+        ZStack {
+            Circle()
+                .stroke(Color.white.opacity(0.08), lineWidth: 6)
+
+            Circle()
+                .trim(from: 0, to: rateHealth)
+                .stroke(rateColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .shadow(color: rateColor.opacity(0.55), radius: 4)
+
+            VStack(spacing: 0) {
+                Text(viewModel.elapsedTimeString)
+                    .font(.system(size: timeSize, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white)
+                Text("スイング \(swingStatValue)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(GlassPalette.label)
+            }
+        }
+        .frame(width: diameter, height: diameter)
+    }
+
+    /// スイング数と転送状況の表示
     /// W-3: 転送前後で表記を変えず常に "n (残m)" 形式で統一
     private var swingStatValue: String {
         "\(viewModel.swingCount) (残\(viewModel.pendingTransferCount))"
     }
 
+    private var rateText: String {
+        guard viewModel.measuredHz > 0 else { return "レート測定中" }
+        return String(format: "%.0f Hz ・ ロス %@", viewModel.measuredHz, viewModel.lossRateString)
+    }
+
+    /// リングの弧が示すレートの健全性（0…1）
+    ///
+    /// ロス率 0% で全周、5% 以上で消える。5% は赤の境界であり、
+    /// そこまで来たら弧の長さより色で気づく。
+    private var rateHealth: Double {
+        guard viewModel.measuredHz > 0 else { return 0 }
+        return 1 - min(viewModel.lossRate / 0.05, 1)
+    }
+
     /// ロス率に応じた色: 1%未満=緑、5%未満=黄、それ以上=赤
-    private func lossRateColor(_ rate: Double) -> Color {
-        if rate < 0.01 { return .green }
-        if rate < 0.05 { return .yellow }
-        return .red
-    }
-}
-
-// MARK: - ActionButton
-
-/// 開始/停止ボタンの共通スタイル（W-4: 両画面で大きさ・位置を統一）
-private struct ActionButton: View {
-    let title: String
-    let systemImage: String
-    let background: Color
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(background)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-// MARK: - StatRow
-
-private struct StatRow: View {
-    let label: String
-    let value: String
-    var valueColor: Color = .white
-
-    var body: some View {
-        HStack {
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.gray)
-            Spacer()
-            Text(value)
-                .font(.caption)
-                .foregroundStyle(valueColor)
-                .monospacedDigit()
-        }
+    private var rateColor: Color {
+        guard viewModel.measuredHz > 0 else { return GlassPalette.label }
+        if viewModel.lossRate < 0.01 { return GlassPalette.accent }
+        if viewModel.lossRate < 0.05 { return GlassPalette.warning }
+        return GlassPalette.danger
     }
 }
 

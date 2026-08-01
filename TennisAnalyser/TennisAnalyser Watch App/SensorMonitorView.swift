@@ -25,7 +25,7 @@ struct SensorMonitorView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
                 traceSection(
                     title: "加速度",
                     unit: "g",
@@ -48,9 +48,9 @@ struct SensorMonitorView: View {
 
                 footer
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 8)
         }
-        .navigationTitle("センサー")
+        .navigationTitle("モニター")
         .alert("エラー", isPresented: $isAlertPresented) {
             Button("OK") { viewModel.clearError() }
         } message: {
@@ -74,24 +74,26 @@ struct SensorMonitorView: View {
         format: String,
         values: (Double?, Double?, Double?)
     ) -> some View {
-        VStack(spacing: 3) {
+        VStack(spacing: 5) {
             HStack(spacing: 4) {
                 Text(title)
-                    .font(.caption2)
+                    .font(.system(size: 13))
                     .foregroundStyle(.white)
                 Text(unit)
-                    .font(.system(size: 9))
-                    .foregroundStyle(.gray)
+                    .font(.system(size: 10))
+                    .foregroundStyle(GlassPalette.label)
                 Spacer()
                 // 目盛りが動くため、いま何倍で見ているかを常に添える
                 Text(scaleLabel)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.blue)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(GlassPalette.info)
                     .animation(.default, value: scaleLabel)
             }
 
             AxisTraceChart(trace: trace, scale: scale, capacity: viewModel.traceCapacity)
-                .frame(height: 58)
+                .frame(height: 66)
+                .padding(3)
+                .glassSurface(cornerRadius: 12)
 
             HStack(spacing: 0) {
                 AxisValue(label: "X", value: values.0, format: format, color: SensorAxisColor.x)
@@ -105,39 +107,30 @@ struct SensorMonitorView: View {
 
     private var footer: some View {
         VStack(spacing: 6) {
-            HStack {
+            HStack(spacing: 4) {
                 Circle()
-                    .fill(viewModel.isRunning ? .green : .gray)
+                    .fill(viewModel.isRunning ? GlassPalette.accent : GlassPalette.label)
                     .frame(width: 6, height: 6)
-                Text(viewModel.isRunning ? "計測中" : "停止中")
-                    .font(.caption2)
-                    .foregroundStyle(.gray)
+                // 「計測中」ではなく「取得中」。計測画面（F-W1〜W6）と紛らわしいため
+                Text(viewModel.isRunning ? "取得中" : "停止中")
+                    .font(.system(size: 11))
+                    .foregroundStyle(GlassPalette.label)
                 Spacer()
                 Text(viewModel.measuredHz > 0 ? String(format: "%.0f Hz", viewModel.measuredHz) : "--- Hz")
-                    .font(.caption2)
-                    .foregroundStyle(.gray)
-                    .monospacedDigit()
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(GlassPalette.label)
             }
 
-            Button {
+            GlassBarButton(
+                title: viewModel.isRunning ? "一時停止" : "再開",
+                tint: viewModel.isRunning ? GlassPalette.caution : GlassPalette.accent
+            ) {
                 if viewModel.isRunning {
                     viewModel.stop()
                 } else {
                     viewModel.start()
                 }
-            } label: {
-                Label(
-                    viewModel.isRunning ? "一時停止" : "再開",
-                    systemImage: viewModel.isRunning ? "pause.circle" : "play.circle"
-                )
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 7)
-                .background(viewModel.isRunning ? Color.orange : Color.green)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
             }
-            .buttonStyle(.plain)
         }
     }
 }
@@ -146,9 +139,9 @@ struct SensorMonitorView: View {
 
 /// 軸の色。X/Y/Z を通して同じ対応にする
 enum SensorAxisColor {
-    static let x = Color.red
-    static let y = Color.green
-    static let z = Color.cyan
+    static let x = GlassPalette.danger
+    static let y = GlassPalette.accent
+    static let z = GlassPalette.info
 }
 
 // MARK: - AxisTraceChart
@@ -157,6 +150,9 @@ enum SensorAxisColor {
 ///
 /// 最新が右端。点数が `capacity` に満たない開始直後は左側が空く
 /// （時間軸の目盛りを一定に保つため、幅いっぱいへ引き伸ばさない）。
+///
+/// 線は自身の色で発光させる（カタログ 1i）。3本が重なる瞬間でも、
+/// にじみの色で手前がどの軸か分かる。
 private struct AxisTraceChart: View {
     let trace: AxisTrace
     let scale: Double
@@ -170,7 +166,7 @@ private struct AxisTraceChart: View {
             var baseline = Path()
             baseline.move(to: CGPoint(x: 0, y: midY))
             baseline.addLine(to: CGPoint(x: size.width, y: midY))
-            context.stroke(baseline, with: .color(.white.opacity(0.18)), lineWidth: 1)
+            context.stroke(baseline, with: .color(.white.opacity(0.16)), lineWidth: 1)
 
             guard capacity > 1, !trace.isEmpty else { return }
 
@@ -193,13 +189,21 @@ private struct AxisTraceChart: View {
                 return path
             }
 
-            let style = StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round)
-            context.stroke(path(for: trace.z), with: .color(SensorAxisColor.z), style: style)
-            context.stroke(path(for: trace.y), with: .color(SensorAxisColor.y), style: style)
-            context.stroke(path(for: trace.x), with: .color(SensorAxisColor.x), style: style)
+            let style = StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round)
+
+            // 奥から Z→Y→X。X（振りの主成分）を最前面に置く
+            for (values, color) in [
+                (trace.z, SensorAxisColor.z),
+                (trace.y, SensorAxisColor.y),
+                (trace.x, SensorAxisColor.x)
+            ] {
+                let line = path(for: values)
+                context.drawLayer { layer in
+                    layer.addFilter(.shadow(color: color.opacity(0.7), radius: 3))
+                    layer.stroke(line, with: .color(color), style: style)
+                }
+            }
         }
-        .background(Color.white.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }
 
@@ -215,10 +219,10 @@ private struct AxisValue: View {
     var body: some View {
         HStack(spacing: 2) {
             Text(label)
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundStyle(color)
             Text(value.map { String(format: format, $0) } ?? "---")
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.white)
         }
         .frame(maxWidth: .infinity)
@@ -263,11 +267,15 @@ private struct MockedSensorMonitorPreview: View {
     let fitted = SensorChartScale.fit(
         peak: trace.peakMagnitude, minimum: SensorChartScale.accelerationMinimum
     )
-    return VStack {
+    return VStack(spacing: 10) {
         AxisTraceChart(trace: trace, scale: fitted, capacity: capacity)
-            .frame(height: 58)
+            .frame(height: 66)
+            .padding(3)
+            .glassSurface(cornerRadius: 12)
         AxisTraceChart(trace: trace, scale: SensorChartScale.accelerationMinimum, capacity: capacity)
-            .frame(height: 58)
+            .frame(height: 66)
+            .padding(3)
+            .glassSurface(cornerRadius: 12)
     }
-    .padding(6)
+    .padding(8)
 }

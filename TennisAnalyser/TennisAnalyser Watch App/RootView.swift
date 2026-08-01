@@ -22,28 +22,33 @@ struct RootView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                NavigationLink {
-                    ContentView(workoutSessionManager: workoutSessionManager)
-                } label: {
-                    MenuRow(
-                        title: "計測",
-                        detail: "スイングを記録する",
-                        systemImage: "figure.tennis",
-                        tint: .green
-                    )
-                }
+            ScrollView {
+                VStack(spacing: 6) {
+                    NavigationLink {
+                        ContentView(workoutSessionManager: workoutSessionManager)
+                    } label: {
+                        MenuRow(
+                            title: "計測",
+                            detail: "スイングを記録する",
+                            systemImage: "figure.tennis",
+                            tint: GlassPalette.accent
+                        )
+                    }
+                    .buttonStyle(.plain)
 
-                NavigationLink {
-                    SensorMonitorView()
-                } label: {
-                    MenuRow(
-                        title: "センサー",
-                        detail: "加速度・角速度を波形で見る",
-                        systemImage: "waveform.path.ecg",
-                        tint: .blue
-                    )
+                    NavigationLink {
+                        SensorMonitorView()
+                    } label: {
+                        MenuRow(
+                            title: "モニター",
+                            detail: "加速度・角速度を波形で見る",
+                            systemImage: "waveform.path.ecg",
+                            tint: GlassPalette.info
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
+                .padding(.horizontal, 6)
             }
             .navigationTitle("Tennis Analyser")
         }
@@ -52,6 +57,11 @@ struct RootView: View {
 
 // MARK: - MenuRow
 
+/// 用途を選ぶ行
+///
+/// Why not `List` のまま組む: 行の背景と選択時のハイライトが標準のグレーで
+/// 描かれ、ガラスの面がその上に重なって二重の板に見える。面をこちらで
+/// 敷くため、素の `ScrollView` に置いている。
 private struct MenuRow: View {
     let title: String
     let detail: String
@@ -61,19 +71,31 @@ private struct MenuRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: systemImage)
-                .font(.system(size: 18))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(tint)
-                .frame(width: 24)
+                .frame(width: 22, height: 22)
+                .background(
+                    tint.opacity(0.13),
+                    in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(tint.opacity(0.40), lineWidth: 0.5)
+                }
+
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.headline)
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                 Text(detail)
                     .font(.system(size: 10))
-                    .foregroundStyle(.gray)
+                    .foregroundStyle(GlassPalette.label)
             }
+            Spacer(minLength: 0)
         }
-        .padding(.vertical, 2)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .glassSurface()
     }
 }
 
