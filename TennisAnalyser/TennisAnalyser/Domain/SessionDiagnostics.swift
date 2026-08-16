@@ -85,6 +85,9 @@ struct SessionDiagnostics: Equatable {
     let sessionDuration: TimeInterval?
 
     let interruptionCount: Int
+    /// 中断からの復帰回数。`interruptionCount` を下回る差が「復帰しなかった中断」であり、
+    /// 録画がセッションの残り全部を取りこぼしたことを意味する（F-I9-1 の判定材料）
+    let resumptionCount: Int
 
     let clipsExtracted: Int
     let clipsSkipped: Int
@@ -109,6 +112,7 @@ struct SessionDiagnostics: Equatable {
         var startedSegmentIndices: Set<Int> = []
         var recordedDuration: TimeInterval = 0
         var interruptionCount = 0
+        var resumptionCount = 0
         var clipsExtracted = 0
         var clipsSkipped = 0
         var skipReasonCounts: [ClipSkipReason: Int] = [:]
@@ -133,7 +137,7 @@ struct SessionDiagnostics: Equatable {
             case .interrupted:
                 interruptionCount += 1
             case .interruptionEnded:
-                break
+                resumptionCount += 1
             case .clipExtracted:
                 clipsExtracted += 1
             case .clipSkipped(_, _, let reason):
@@ -154,6 +158,7 @@ struct SessionDiagnostics: Equatable {
             recordedDuration: recordedDuration,
             sessionDuration: sessionDuration,
             interruptionCount: interruptionCount,
+            resumptionCount: resumptionCount,
             clipsExtracted: clipsExtracted,
             clipsSkipped: clipsSkipped,
             skipReasonCounts: skipReasonCounts,

@@ -94,6 +94,22 @@ struct SessionDiagnosticsTests {
         ])
 
         #expect(d.interruptionCount == 2)
+        #expect(d.resumptionCount == 2)
+    }
+
+    @Test("復帰しなかった中断は、中断回数と復帰回数の差として現れる")
+    func unresumedInterruptionsAppearAsDifference() {
+        // 中断終了の通知が来ない場合（熱の逼迫等）、以降の録画は止まったままになる
+        let d = make([
+            .sessionStarted(at: at(0)),
+            .interrupted(at: at(10), reason: "willResignActive"),
+            .interruptionEnded(at: at(20)),
+            .interrupted(at: at(30), reason: "captureInterrupted(reason=5)"),
+            .sessionEnded(at: at(3600)),
+        ])
+
+        #expect(d.interruptionCount == 2)
+        #expect(d.resumptionCount == 1)
     }
 
     // MARK: - クリップ生成
