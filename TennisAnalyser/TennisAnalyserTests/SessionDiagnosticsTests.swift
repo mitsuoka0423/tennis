@@ -131,6 +131,49 @@ struct SessionDiagnosticsTests {
         #expect(d.skipReasonCounts[.detectedAtMissing] == nil)
     }
 
+    @Test("再試行で成功したスイングは失敗として数えない")
+    func retrySupersedesEarlierSkip() {
+        // 到着時は録画中で失敗し、セグメントが閉じてから成功する（F-I9-8 の通常経路）
+        let d = make([
+            .clipSkipped(sequence: 1, at: at(10), reason: .outOfRecordedRange),
+            .clipSkipped(sequence: 1, at: at(20), reason: .outOfRecordedRange),
+            .clipExtracted(sequence: 1, at: at(30)),
+        ])
+
+        #expect(d.clipsExtracted == 1)
+        #expect(d.clipsSkipped == 0)
+        #expect(d.skipReasonCounts.isEmpty)
+    }
+
+    @Test("同じスイングを何度試行しても、集計はスイングの数になる")
+    func countsAreSwingsNotAttempts() {
+        // 2026-08-09: 再生成後に「成功227 / 失敗329」と出たが、未生成は実際には10件だった。
+        // 試行を数えると、再試行するたびに失敗数が増えていく
+        var events: [DiagnosticEvent] = []
+        for attempt in 0..<5 {
+            events.append(.clipSkipped(sequence: 1, at: at(Double(attempt)), reason: .outOfRecordedRange))
+        }
+        events.append(.clipExtracted(sequence: 2, at: at(10)))
+
+        let d = make(events)
+
+        #expect(d.clipsExtracted == 1)
+        #expect(d.clipsSkipped == 1)
+        #expect(d.skipReasonCounts[.outOfRecordedRange] == 1)
+    }
+
+    @Test("最後の判定が理由別の集計に反映される")
+    func latestSkipReasonWins() {
+        let d = make([
+            .clipSkipped(sequence: 1, at: at(10), reason: .outOfRecordedRange),
+            .clipSkipped(sequence: 1, at: at(20), reason: .extractionFailed),
+        ])
+
+        #expect(d.clipsSkipped == 1)
+        #expect(d.skipReasonCounts[.extractionFailed] == 1)
+        #expect(d.skipReasonCounts[.outOfRecordedRange] == nil)
+    }
+
     @Test("セグメントの終了理由が種別ごとに集計される")
     func segmentEndReasonsAreAggregated() {
         let d = make([

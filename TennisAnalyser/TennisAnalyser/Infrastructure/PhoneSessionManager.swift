@@ -121,7 +121,30 @@ extension PhoneSessionManager: WCSessionDelegate {
         }
     }
 
+    /// 未生成のクリップを掃く（F-I9-8）
+    ///
+    /// - Parameter sessionId: 対象セッション。nil なら全セッション（App起動時の掃除）
+    ///
+    /// 生成済みのスイングは `extractClipIfNeeded` が集合の照合だけで早期 return するため、
+    /// 全件を対象にしても実質の処理は未生成分だけになる。
+    @MainActor
+    func sweepPendingClips(sessionId: String? = nil) async {
+        let records = store.records.filter { sessionId == nil || $0.sessionId == sessionId }
+        for record in records {
+            await videoStore.extractClipIfNeeded(
+                sessionId: record.sessionId, sequence: record.sequence, detectedAt: record.detectedAt
+            )
+        }
+    }
+
     /// セッション終了から猶予時間後に、残っているスイングのクリップ化を試みる
+    ///
+    /// Why not これを唯一の再試行にする（2026-08-16 まではそうしていた）:
+    /// `Task.sleep` の60秒はAppが前面にある前提であり、バックグラウンドでは suspend される。
+    /// 2026-08-09 は 17:59:28 にAppがバックグラウンドへ移りそのままセッションが終了したため、
+    /// この再試行が実行されず 234件が未生成のまま残った。
+    /// 主たる再試行はセグメントが閉じた時点（`onSegmentClosed`）へ移し、本処理は
+    /// 最終セグメントぶんを拾う保険として残す。
     ///
     /// Why not 生成後にセグメントを削除する（2026-07-25 まではそうしていた）:
     /// セグメントは一次データであり、クリップは何度でも再生成できる派生データにすぎない
@@ -131,12 +154,7 @@ extension PhoneSessionManager: WCSessionDelegate {
     private func scheduleRemainingClips(sessionId: String) {
         Task {
             try? await Task.sleep(nanoseconds: Self.clipRetryDelaySeconds * 1_000_000_000)
-            let pendingRecords = self.store.records.filter { $0.sessionId == sessionId }
-            for record in pendingRecords {
-                await self.videoStore.extractClipIfNeeded(
-                    sessionId: record.sessionId, sequence: record.sequence, detectedAt: record.detectedAt
-                )
-            }
+            await self.sweepPendingClips(sessionId: sessionId)
         }
     }
 }

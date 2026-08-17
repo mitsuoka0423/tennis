@@ -42,13 +42,25 @@ struct TennisAnalyserApp: App {
             ) }
         }
 
-        sessionManager = PhoneSessionManager(
+        let sessionManager = PhoneSessionManager(
             store: store,
             continuousStore: continuousStore,
             videoStore: videoStore,
             recorder: recorder,
             diagnostics: diagnostics
         )
+        self.sessionManager = sessionManager
+
+        // F-I9-8: セグメントが閉じた時点で未生成クリップを掃く。
+        // スイングは自分が写っているセグメントの録画中に届くため、
+        // 上の onIngested（到着時の生成）は構造上ほぼ必ず失敗する。
+        // 最大長10分ごとにセグメントが閉じるので、ここでセッション中に消化される。
+        videoStore.onSegmentClosed = { [weak sessionManager] closedSessionId in
+            Task { @MainActor in
+                await sessionManager?.sweepPendingClips(sessionId: closedSessionId)
+            }
+        }
+
         sessionManager.activate()
     }
 
@@ -66,6 +78,9 @@ struct TennisAnalyserApp: App {
                     continuousStore.reload()
                     videoStore.reload()
                     annotations.reload()
+                    // F-I9-8: 最終セグメントぶんなど、セッション中に消化しきれなかった分を拾う。
+                    // reload の後でなければ生成済みの判定（availableClipKeys）が空になる
+                    await sessionManager.sweepPendingClips()
                 }
         }
     }

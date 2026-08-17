@@ -191,6 +191,13 @@ final class VideoStore: ObservableObject {
         }
     }
 
+    /// セグメントの終了時刻が確定したときに呼ばれる（F-I9-8）
+    ///
+    /// スイングは自分が写っているセグメントの録画中に届くため、到着時のクリップ生成は
+    /// 必ず `outOfRecordedRange` になる。生成できるのはセグメントが閉じた後だけであり、
+    /// その契機をここで通知する。
+    var onSegmentClosed: ((_ sessionId: String) -> Void)?
+
     /// セグメントの録画終了を manifest へ記録する
     func registerSegmentEnd(sessionId: String, index: Int, endedAt: Date, reason: SegmentEndReason) {
         mutate(sessionId: sessionId, fallbackStartedAt: endedAt) { session in
@@ -198,6 +205,7 @@ final class VideoStore: ObservableObject {
             session.segments[i].endedAt = endedAt
             session.segments[i].endReason = reason
         }
+        onSegmentClosed?(sessionId)
     }
 
     /// セッションの終了を manifest へ記録する
@@ -331,9 +339,25 @@ final class VideoStore: ObservableObject {
         guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
             throw VideoExportError.exportSessionUnavailable
         }
+
+        // Why not 要求された範囲をそのまま渡す: セグメント末尾から postRoll（2秒）以内に
+        // 落ちたスイングは endSeconds が実体の長さを超え、書き出しが失敗していた。
+        // 2026-08-09 のセッションでは5件がこれで失われた。切り詰めれば短いクリップにはなるが、
+        // インパクト自体は写っているため使える。
+        //
+        // Why not manifest の duration でクランプする: manifest は壁時計の差であり、
+        // 実体の長さとは数百ミリ秒ずれる。境界の判定には実体の長さを使う。
+        let assetSeconds = try await asset.load(.duration).seconds
+        guard assetSeconds.isFinite, assetSeconds > 0 else {
+            throw VideoExportError.emptyTimeRange
+        }
+        let start = max(0, min(startSeconds, assetSeconds))
+        let end = min(endSeconds, assetSeconds)
+        guard end > start else { throw VideoExportError.emptyTimeRange }
+
         export.timeRange = CMTimeRange(
-            start: CMTime(seconds: startSeconds, preferredTimescale: 600),
-            end: CMTime(seconds: endSeconds, preferredTimescale: 600)
+            start: CMTime(seconds: start, preferredTimescale: 600),
+            end: CMTime(seconds: end, preferredTimescale: 600)
         )
         // Why not プリセットのみ: プリセット指定の再エンコードは元動画の向きメタデータ
         // （preferredTransform）を落とすため、横向き録画でもクリップが縦向きになる。
@@ -350,11 +374,14 @@ final class VideoStore: ObservableObject {
 enum VideoExportError: LocalizedError {
     case exportSessionUnavailable
     case exportFailed
+    /// 切り詰めた結果が空になった（セグメントの実体が無い・長さがゼロ等）
+    case emptyTimeRange
 
     var errorDescription: String? {
         switch self {
         case .exportSessionUnavailable: return "動画の書き出しを準備できませんでした。"
         case .exportFailed: return "動画の書き出しに失敗しました。"
+        case .emptyTimeRange: return "切り出す範囲が録画に含まれていません。"
         }
     }
 }
