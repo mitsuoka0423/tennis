@@ -80,6 +80,27 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
     /// 録画中のセグメント番号（F-I7-3）
     private var currentSegmentIndex = 0
 
+    // MARK: - 復旧監視（F-I9-1）と上限（F-I9-2）
+
+    /// 復旧監視の間隔。「継続中なのに録画していない」状態をこの周期で拾う
+    private static let supervisorInterval: TimeInterval = 5
+
+    /// セッションの最大長（F-I9-2）
+    ///
+    /// Why not 上限なし: 終了通知が届かないまま持ち帰ると録画が回り続ける。
+    /// 1080p は 5〜7GB/時であり、空き 90GB を半日で埋める。
+    private static let maxSessionDuration: TimeInterval = 3 * 60 * 60
+
+    /// 空き容量を読む間隔。5秒ごとに読むほど速く減る値ではない
+    private static let capacityCheckInterval: TimeInterval = 60
+
+    private var supervisorTask: Task<Void, Never>?
+    /// セッション開始時刻（最大長の判定に使う）
+    private var sessionStartedAt: Date?
+    private var lastCapacityCheckAt: Date?
+    /// 中断で止まったまま、まだ録画が再開していない
+    private var isAwaitingRecovery = false
+
     init(videoStore: VideoStore, diagnostics: DiagnosticsStore) {
         self.videoStore = videoStore
         self.diagnostics = diagnostics
@@ -205,14 +226,27 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
     func beginSession(sessionId: String) {
         isSessionActive = true
         activeSessionId = sessionId
+        sessionStartedAt = Date()
+        lastCapacityCheckAt = nil
+        isAwaitingRecovery = false
+        startSupervisor()
         startNextSegment()
     }
 
     /// Watch のセッション終了通知を受けて録画を終える
     func endSession() {
+        clearSessionState()
+        stopRecording(reason: .sessionEnded)
+    }
+
+    private func clearSessionState() {
+        supervisorTask?.cancel()
+        supervisorTask = nil
         isSessionActive = false
         activeSessionId = nil
-        stopRecording(reason: .sessionEnded)
+        sessionStartedAt = nil
+        lastCapacityCheckAt = nil
+        isAwaitingRecovery = false
     }
 
     /// 次のセグメントの録画を開始する
@@ -262,7 +296,7 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
     }
 
     @objc private func handleDidBecomeActive() {
-        resumeIfNeeded(trigger: "didBecomeActive")
+        attemptRecovery(trigger: "didBecomeActive")
     }
 
     @objc private func handleSessionWasInterrupted(_ note: Notification) {
@@ -272,25 +306,90 @@ final class PracticeVideoRecorder: NSObject, ObservableObject {
     }
 
     @objc private func handleSessionInterruptionEnded() {
-        resumeIfNeeded(trigger: "captureInterruptionEnded")
+        attemptRecovery(trigger: "captureInterruptionEnded")
     }
 
-    /// セッションが継続中なのに録画が止まっていれば再開する
+    /// セッションが継続中なのに録画が止まっていれば再開を試みる（F-I9-1）
     ///
-    /// 中断の入口が複数ある一方、復帰契機も複数あるため、
-    /// 「論理状態が有効かつ物理状態が停止」という条件だけで判断する。
+    /// 「論理状態が有効かつ物理状態が停止」という**状態だけ**で判断する。
     /// どの経路から呼ばれても同じ結果になり、二重に開始することもない。
-    private func resumeIfNeeded(trigger: String) {
-        guard isSessionActive, !isRecording, activeSessionId != nil else { return }
-        AppLog.recording.info("resuming after interruption: trigger=\(trigger, privacy: .public)")
-        if let sessionId = activeSessionId {
-            diagnostics.record(.interruptionEnded(at: Date()), for: sessionId)
+    ///
+    /// Why not 記録するのが `interruptionEnded` ではなく `recoveryAttempted` なのか:
+    /// ここは「試みた」時点であり、実際に録画が始まるとは限らない。
+    /// 復帰したことは `didStartRecordingTo` 側で記録する。両者を混ぜると、
+    /// 「中断したまま戻れていない」ことを数えられなくなる。
+    private func attemptRecovery(trigger: String) {
+        guard isSessionActive, !isRecording, let sessionId = activeSessionId else { return }
+        guard permissionState == .granted else {
+            AppLog.recording.error("recovery blocked: camera permission not granted")
+            return
         }
+        AppLog.recording.info("recovery attempt: trigger=\(trigger, privacy: .public)")
+        diagnostics.record(.recoveryAttempted(at: Date(), trigger: trigger), for: sessionId)
         // 中断中は AVCaptureSession 自体も停止しているため、走らせ直してから録画する
         sessionQueue.async { [session] in
             if !session.isRunning { session.startRunning() }
         }
         startNextSegment()
+    }
+
+    // MARK: - 復旧監視（F-I9-1）と上限（F-I9-2）
+
+    /// セッションが続く限り、状態を見て復旧を試み続ける
+    ///
+    /// Why not 停止契機ごとに通知を購読する（F-I7-2 の設計）: 通知2本
+    /// （`didBecomeActive` / `AVCaptureSessionInterruptionEnded`）では
+    /// `.error` でのセグメント終了・保存先作成の失敗・中断終了の通知が来ない中断を拾えず、
+    /// 一度当たるとセッションの残り全部が空白になる。停止の原因を列挙する設計は、
+    /// 列挙漏れの分だけそのまま欠陥になる。
+    ///
+    /// Why not バックグラウンドでも動かす: iOS はバックグラウンドで
+    /// `AVCaptureSession` を動かさない。App が suspend されればこの Task も止まり、
+    /// 前面へ戻ったときに `didBecomeActive` と本監視の両方が復旧を試みる。
+    private func startSupervisor() {
+        supervisorTask?.cancel()
+        supervisorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(Self.supervisorInterval))
+                guard !Task.isCancelled, let self else { return }
+                self.superviseTick()
+            }
+        }
+    }
+
+    private func superviseTick() {
+        guard isSessionActive, let sessionId = activeSessionId else { return }
+
+        if let reason = exceededLimitReason() {
+            AppLog.recording.info("session limit reached: \(reason, privacy: .public)")
+            diagnostics.record(.sessionLimitReached(at: Date(), reason: reason), for: sessionId)
+            errorMessage = "上限に達したため録画を終了しました（\(reason)）。"
+            clearSessionState()
+            stopRecording(reason: .limitReached)
+            return
+        }
+
+        guard !isRecording else { return }
+        attemptRecovery(trigger: "supervisor")
+    }
+
+    /// 上限に達していればその理由を返す（F-I9-2）
+    private func exceededLimitReason() -> String? {
+        if let sessionStartedAt,
+           Date().timeIntervalSince(sessionStartedAt) >= Self.maxSessionDuration {
+            return "maxSessionDuration(\(Int(Self.maxSessionDuration / 3600))h)"
+        }
+
+        let now = Date()
+        if let lastCapacityCheckAt,
+           now.timeIntervalSince(lastCapacityCheckAt) < Self.capacityCheckInterval {
+            return nil
+        }
+        lastCapacityCheckAt = now
+        if let capacity = StorageCapacity.current(), capacity.isCritical {
+            return "storageCritical(\(capacity.availableDescription))"
+        }
+        return nil
     }
 
     private func recordInterruption(_ reason: String) {
@@ -341,6 +440,13 @@ extension PracticeVideoRecorder: AVCaptureFileOutputRecordingDelegate {
                 let index = self.currentSegmentIndex
                 self.videoStore.registerSegmentStart(sessionId: sessionId, index: index, startedAt: startedAt)
                 self.diagnostics.record(.segmentStarted(index: index, at: startedAt), for: sessionId)
+                // 中断で止まっていたぶんが実際に戻った時点を記録する（F-I9-1）。
+                // 試行（recoveryAttempted）と分けているのは、試みたが開始できていない
+                // 状態を数えられるようにするため
+                if self.isAwaitingRecovery {
+                    self.isAwaitingRecovery = false
+                    self.diagnostics.record(.interruptionEnded(at: startedAt), for: sessionId)
+                }
             }
         }
     }
@@ -397,6 +503,11 @@ extension PracticeVideoRecorder: AVCaptureFileOutputRecordingDelegate {
                 """
             )
             if reachedMaxDuration { reason = .maxDuration }
+
+            // セッションが続いているのに中断で止まった＝復旧待ち（F-I9-1）
+            if reason == .interrupted, self.isSessionActive {
+                self.isAwaitingRecovery = true
+            }
 
             self.videoStore.registerSegmentEnd(
                 sessionId: sessionId, index: index, endedAt: endedAt, reason: reason

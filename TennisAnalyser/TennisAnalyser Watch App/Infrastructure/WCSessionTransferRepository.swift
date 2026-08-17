@@ -39,7 +39,10 @@ final class WCSessionTransferRepository: NSObject, SwingTransferRepository {
     // MARK: - State
 
     var onStatusChanged: ((_ transferred: Int, _ pending: Int) -> Void)?
+    var onReachabilityChanged: ((_ reachable: Bool, _ lastContactAt: Date?) -> Void)?
     private var transferredCount = 0
+    /// 最後に iPhone への到達を確認できた時刻（F-I9-6）
+    private var lastContactAt: Date?
 
     private var session: WCSession { WCSession.default }
 
@@ -139,6 +142,20 @@ final class WCSessionTransferRepository: NSObject, SwingTransferRepository {
         }
     }
 
+    /// iPhone への到達性を通知する（F-I9-6）
+    ///
+    /// Why not 到達性の変化通知だけで更新する: `sessionReachabilityDidChange` は
+    /// 圏外へ出た瞬間には必ずしも飛ばない。転送の完了は到達できたことの実証なので、
+    /// そちらでも時刻を進める。
+    private func notifyReachability() {
+        let reachable = session.activationState == .activated && session.isReachable
+        if reachable { lastContactAt = Date() }
+        let contact = lastContactAt
+        DispatchQueue.main.async { [weak self] in
+            self?.onReachabilityChanged?(reachable, contact)
+        }
+    }
+
     /// 転送状態を通知する
     /// - Parameter finished: 完了直後の転送。`didFinish` 時点では
     ///   `outstandingFileTransfers` にまだ含まれていることがあるため除外する（W-2）
@@ -169,8 +186,14 @@ extension WCSessionTransferRepository: WCSessionDelegate {
             return
         }
         AppLog.transfer.info("activated: state=\(activationState.rawValue, privacy: .public)")
+        notifyReachability()
         // アクティベート完了時に未転送分を再送（前回セッションの残り）
         retryPending()
+    }
+
+    func sessionReachabilityDidChange(_ session: WCSession) {
+        AppLog.transfer.info("reachability changed: \(session.isReachable, privacy: .public)")
+        notifyReachability()
     }
 
     func session(_ session: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: Error?) {
@@ -181,6 +204,8 @@ extension WCSessionTransferRepository: WCSessionDelegate {
         } else {
             transferredCount += 1
             AppLog.transfer.info("transfer finished \(url.lastPathComponent, privacy: .public)")
+            // 転送が完了したこと自体が到達の実証（F-I9-6）
+            notifyReachability()
             // 転送完了後にローカルキャッシュを削除（F-W5 / ストレージ保護）
             // 削除先の振り分けは metadata ではなく保存先パスで行う。metadata は
             // 転送キューの永続化を跨いで古い形式（type 無し）が残り得るため

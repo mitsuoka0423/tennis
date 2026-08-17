@@ -97,6 +97,43 @@ struct SessionDiagnosticsTests {
         #expect(d.resumptionCount == 2)
     }
 
+    @Test("復旧の試行回数は、実際の復帰回数と別に数えられる")
+    func recoveryAttemptsAreCountedSeparately() {
+        // F-I9-1: 監視は5秒ごとに試みる。試みても開始できない状態が続くと、
+        // 試行だけが増えて復帰が増えない形で現れる
+        let d = make([
+            .interrupted(at: at(10), reason: "captureInterrupted(reason=1)"),
+            .recoveryAttempted(at: at(15), trigger: "supervisor"),
+            .recoveryAttempted(at: at(20), trigger: "supervisor"),
+            .recoveryAttempted(at: at(25), trigger: "didBecomeActive"),
+            .interruptionEnded(at: at(26)),
+        ])
+
+        #expect(d.interruptionCount == 1)
+        #expect(d.recoveryAttemptCount == 3)
+        #expect(d.resumptionCount == 1)
+    }
+
+    @Test("上限に達して終了した理由が残る")
+    func limitReasonIsRecorded() {
+        // F-I9-2: 終了通知が届かないまま回り続けるのを止めた記録
+        let d = make([
+            .sessionStarted(at: at(0)),
+            .sessionLimitReached(at: at(10800), reason: "maxSessionDuration(3h)"),
+            .segmentEnded(index: 0, at: at(10800), reason: .limitReached),
+        ])
+
+        #expect(d.limitReachedReason == "maxSessionDuration(3h)")
+        #expect(d.segmentEndReasonCounts[.limitReached] == 1)
+    }
+
+    @Test("上限に達していないセッションでは理由が nil になる")
+    func limitReasonIsNilWhenNotReached() {
+        let d = make([.sessionStarted(at: at(0)), .sessionEnded(at: at(600))])
+
+        #expect(d.limitReachedReason == nil)
+    }
+
     @Test("復帰しなかった中断は、中断回数と復帰回数の差として現れる")
     func unresumedInterruptionsAppearAsDifference() {
         // 中断終了の通知が来ない場合（熱の逼迫等）、以降の録画は止まったままになる

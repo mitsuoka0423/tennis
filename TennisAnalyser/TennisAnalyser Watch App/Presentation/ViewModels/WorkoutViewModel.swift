@@ -44,6 +44,11 @@ final class WorkoutViewModel: ObservableObject {
     @Published private(set) var lossRate: Double = 0.0
     @Published private(set) var errorMessage: String?
 
+    /// iPhone といま通信できるか（F-I9-6）
+    @Published private(set) var isPhoneReachable: Bool = false
+    /// 最後に iPhone と通信できた時刻。nil = 一度も通信できていない
+    @Published private(set) var lastPhoneContactAt: Date?
+
     // MARK: - Configuration
 
     /// true にするとシミュレータ用モックリポジトリを使用する
@@ -185,6 +190,10 @@ final class WorkoutViewModel: ObservableObject {
             self?.transferredCount = transferred
             self?.pendingTransferCount = pending
         }
+        transferRepo.onReachabilityChanged = { [weak self] reachable, lastContactAt in
+            self?.isPhoneReachable = reachable
+            self?.lastPhoneContactAt = lastContactAt
+        }
         transferRepo.activate()
     }
 
@@ -292,5 +301,21 @@ final class WorkoutViewModel: ObservableObject {
     /// ロス率を `xx.x%` 形式で返す
     var lossRateString: String {
         String(format: "%.1f%%", lossRate * 100)
+    }
+
+    /// iPhone との通信状態の表示文字列（F-I9-6）
+    ///
+    /// 圏外のときは**経過時間**を出す。コート反対側へ行けば必ず切れるため、
+    /// 切れていること自体は異常ではない。異常なのは「戻ったのに繋がらない」ことであり、
+    /// それは経過時間でしか判断できない。
+    ///
+    /// 注: 計測中は1秒ごとの `elapsedSeconds` 更新で再描画されるため、
+    /// この文字列も追従する（自前のタイマーは持たない）。
+    var phoneContactString: String {
+        if isPhoneReachable { return "接続中" }
+        guard let lastPhoneContactAt else { return "未接続" }
+        let seconds = Int(Date().timeIntervalSince(lastPhoneContactAt))
+        if seconds < 60 { return "圏外 \(seconds)秒" }
+        return "圏外 \(seconds / 60)分"
     }
 }

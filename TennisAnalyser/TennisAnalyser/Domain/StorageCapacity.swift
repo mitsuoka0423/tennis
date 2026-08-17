@@ -21,6 +21,14 @@ struct StorageCapacity: Equatable {
     /// これを下回ったら警告する（1時間の練習を録りきれない）
     nonisolated static let warningThreshold: Int64 = bytesPerHour
 
+    /// これを下回ったら録画を止める（F-I9-2）
+    ///
+    /// Why not 警告と同じ閾値で止める: 警告は「1時間録りきれない」の目安であり、
+    /// その時点で止めると録れるはずの練習を途中で切ることになる。
+    /// 停止はディスクを使い切って書き込みが失敗し、セグメントが壊れるのを防ぐためのものなので、
+    /// 実際に危ない水準まで下げる（約20分ぶん）。
+    nonisolated static let criticalThreshold: Int64 = 2 * 1024 * 1024 * 1024
+
     let availableBytes: Int64
 
     /// 現在の空き容量で録画できる見込み時間
@@ -31,6 +39,11 @@ struct StorageCapacity: Equatable {
     /// 1時間の練習を録りきれない見込みか
     nonisolated var isLow: Bool {
         availableBytes < Self.warningThreshold
+    }
+
+    /// 録画を続けると書き込みに失敗しうる水準か（F-I9-2）
+    nonisolated var isCritical: Bool {
+        availableBytes < Self.criticalThreshold
     }
 
     /// Documents を含むボリュームの空き容量を読む

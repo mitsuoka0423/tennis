@@ -55,6 +55,13 @@ struct RecordingCameraView: View {
             VStack(spacing: 8) {
                 statusBadge
                     .padding(.top, 12)
+                // 操作方法は待機中にだけ出す。録画中・復旧中に読む必要は無く、
+                // 状態表示を大きくした意味が薄れる
+                if !recorder.isSessionActive && !recorder.isRecording {
+                    Text("Apple Watch で計測を開始すると自動的に録画します")
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
                 if let capacity, capacity.isLow {
                     capacityWarning(capacity)
                 }
@@ -85,19 +92,40 @@ struct RecordingCameraView: View {
     }
 
     /// 自動録画の状態表示（手動ボタンは無い。Watch の計測開始/停止に連動する）
+    ///
+    /// F-I9-6: 三脚から離れて練習するため、状態を読めるのは戻ってきた一瞬だけになる。
+    /// 近寄らずに読めるよう大きく出し、**3つの状態を色で区別する**。
+    /// 2026-08-09 は「セッションは続いているのに録画が止まっている」状態で
+    /// 5分19秒を取りこぼしたが、当時の表示ではそれが「待機中」と同じ見た目だった。
     private var statusBadge: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Circle()
-                .fill(recorder.isRecording ? .red : .gray)
-                .frame(width: 10, height: 10)
-            Text(recorder.isRecording ? "自動録画中 \(elapsedTimeString)" : "待機中（Watchで計測を開始すると自動的に録画します）")
-                .font(.system(.body, design: .monospaced).weight(.semibold))
+                .fill(statusColor)
+                .frame(width: 14, height: 14)
+            Text(statusText)
+                .font(.system(.title3, design: .monospaced).weight(.bold))
                 .foregroundStyle(.white)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(.black.opacity(0.5))
-        .clipShape(Capsule())
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(statusColor.opacity(recorder.isRecording ? 0.0 : 0.35))
+        .background(.black.opacity(0.6))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var statusColor: Color {
+        if recorder.isRecording { return .red }
+        // セッションは続いているのに録画していない＝復旧待ち。最も見逃したくない状態
+        if recorder.isSessionActive { return .orange }
+        return .gray
+    }
+
+    private var statusText: String {
+        if recorder.isRecording { return "録画中 \(elapsedTimeString)" }
+        if recorder.isSessionActive { return "録画が停止しています（復旧中）" }
+        return "待機中"
     }
 
     private var elapsedTimeString: String {

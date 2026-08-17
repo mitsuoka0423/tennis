@@ -163,6 +163,8 @@ private struct RecordingView: View {
             elapsedText: viewModel.elapsedTimeString,
             swingCount: viewModel.swingCount,
             pendingTransferCount: viewModel.pendingTransferCount,
+            isPhoneReachable: viewModel.isPhoneReachable,
+            phoneContactText: viewModel.phoneContactString,
             measuredHz: viewModel.measuredHz,
             lossRate: viewModel.lossRate,
             buckets: viewModel.swingBuckets,
@@ -180,6 +182,8 @@ private struct RecordingLayout: View {
     let elapsedText: String
     let swingCount: Int
     let pendingTransferCount: Int
+    let isPhoneReachable: Bool
+    let phoneContactText: String
     let measuredHz: Double
     let lossRate: Double
     let buckets: [Int?]
@@ -247,6 +251,25 @@ private struct RecordingLayout: View {
             Text("残 \(pendingTransferCount)")
                 .font(.system(size: 11))
                 .foregroundStyle(GlassPalette.tertiaryText)
+
+            // F-I9-6: 残件数だけでは「転送が詰まっている」のか「圏外なのか」が
+            // 区別できない。コート反対側では 20〜30m 離れ Bluetooth が必ず切れるため、
+            // 切れていること自体は異常ではない。異常なのは戻っても繋がらないこと
+            Image(systemName: isPhoneReachable
+                  ? "iphone.radiowaves.left.and.right" : "iphone.slash")
+                .font(.system(size: 10))
+                .foregroundStyle(isPhoneReachable
+                                 ? GlassPalette.tertiaryText : GlassPalette.warning)
+
+            // 圏外の経過時間は、切れているときだけ出す。
+            // 接続中は記号で足り、常時出すと行が横に詰まる
+            if !isPhoneReachable {
+                Text(phoneContactText)
+                    .font(.system(size: 9))
+                    .foregroundStyle(GlassPalette.warning)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
 
             Text(rateText)
                 .font(.system(size: 11))
@@ -379,9 +402,26 @@ private struct SwingBarChart: View {
         elapsedText: "03:07",
         swingCount: 96,
         pendingTransferCount: 2,
+        isPhoneReachable: true,
+        phoneContactText: "接続中",
         measuredHz: 198,
         lossRate: 0.008,
         buckets: [nil, nil, nil, 4, 9, 7, 12, 6, 0, 8, 11, 5],
+        onStop: {}
+    )
+}
+
+#Preview("計測中・コート反対側") {
+    // F-I9-6: 圏外の見え方。転送が止まるので残件数も増える
+    RecordingLayout(
+        elapsedText: "18:42",
+        swingCount: 214,
+        pendingTransferCount: 23,
+        isPhoneReachable: false,
+        phoneContactText: "圏外 3分",
+        measuredHz: 199,
+        lossRate: 0.004,
+        buckets: [7, 5, 9, 4, 9, 7, 12, 6, 0, 8, 11, 5],
         onStop: {}
     )
 }

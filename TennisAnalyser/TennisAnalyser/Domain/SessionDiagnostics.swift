@@ -22,6 +22,8 @@ enum SegmentEndReason: String, Codable, Equatable, CaseIterable {
     case maxDuration
     /// 録画エラー
     case error
+    /// セッションの上限（最大長・空き容量）に到達して終了した（F-I9-2）
+    case limitReached
 }
 
 /// クリップを生成できなかった理由
@@ -47,7 +49,12 @@ enum DiagnosticEvent: Codable, Equatable {
     case segmentStarted(index: Int, at: Date)
     case segmentEnded(index: Int, at: Date, reason: SegmentEndReason)
     case interrupted(at: Date, reason: String)
+    /// **実際に録画が再開したとき**に記録する（F-I9-1）。試行は `recoveryAttempted`
     case interruptionEnded(at: Date)
+    /// 録画の再開を試みた（通知経由・監視経由の双方。F-I9-1）
+    case recoveryAttempted(at: Date, trigger: String)
+    /// セッションの上限に達して録画を終了した（F-I9-2）
+    case sessionLimitReached(at: Date, reason: String)
     case clipExtracted(sequence: Int, at: Date)
     case clipSkipped(sequence: Int, at: Date, reason: ClipSkipReason)
 
@@ -61,7 +68,7 @@ enum DiagnosticEvent: Codable, Equatable {
             return at
         case .segmentEnded(_, let at, _), .clipSkipped(_, let at, _):
             return at
-        case .interrupted(let at, _):
+        case .interrupted(let at, _), .recoveryAttempted(let at, _), .sessionLimitReached(let at, _):
             return at
         }
     }
@@ -85,9 +92,14 @@ struct SessionDiagnostics: Equatable {
     let sessionDuration: TimeInterval?
 
     let interruptionCount: Int
-    /// 中断からの復帰回数。`interruptionCount` を下回る差が「復帰しなかった中断」であり、
-    /// 録画がセッションの残り全部を取りこぼしたことを意味する（F-I9-1 の判定材料）
+    /// **実際に録画が再開した**回数。`interruptionCount` を下回る差が
+    /// 「復帰しなかった中断」であり、録画がセッションの残り全部を取りこぼしたことを意味する
     let resumptionCount: Int
+    /// 録画の再開を試みた回数（F-I9-1）。
+    /// `resumptionCount` を大きく上回るなら、試みてはいるが開始できていない
+    let recoveryAttemptCount: Int
+    /// 上限（最大長・空き容量）に達して終了した理由。到達していなければ nil（F-I9-2）
+    let limitReachedReason: String?
 
     /// クリップを生成できたスイングの数（**試行回数ではなくスイングの数**）
     let clipsExtracted: Int
@@ -115,6 +127,8 @@ struct SessionDiagnostics: Equatable {
         var recordedDuration: TimeInterval = 0
         var interruptionCount = 0
         var resumptionCount = 0
+        var recoveryAttemptCount = 0
+        var limitReachedReason: String?
         // クリップは1スイングにつき何度でも試行されるため、出来事を数えると
         // 試行回数になってしまう。スイングごとに最後の判定だけを残す。
         // 2026-08-09 は再生成後に「成功227 / 失敗329」と出たが、
@@ -143,6 +157,10 @@ struct SessionDiagnostics: Equatable {
                 interruptionCount += 1
             case .interruptionEnded:
                 resumptionCount += 1
+            case .recoveryAttempted:
+                recoveryAttemptCount += 1
+            case .sessionLimitReached(_, let reason):
+                limitReachedReason = reason
             case .clipExtracted(let sequence, _):
                 extractedSequences.insert(sequence)
                 latestSkipBySequence.removeValue(forKey: sequence)
@@ -170,6 +188,8 @@ struct SessionDiagnostics: Equatable {
             sessionDuration: sessionDuration,
             interruptionCount: interruptionCount,
             resumptionCount: resumptionCount,
+            recoveryAttemptCount: recoveryAttemptCount,
+            limitReachedReason: limitReachedReason,
             clipsExtracted: extractedSequences.count,
             clipsSkipped: latestSkipBySequence.count,
             skipReasonCounts: skipReasonCounts,

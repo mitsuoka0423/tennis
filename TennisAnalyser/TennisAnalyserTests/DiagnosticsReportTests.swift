@@ -61,6 +61,27 @@ struct DiagnosticsReportTests {
         #expect(report.contains("復帰しなかった中断が 1 件あります"))
     }
 
+    @Test("復旧の試行と上限到達が共有テキストに含まれる")
+    func recoveryAndLimitAreIncluded() {
+        let report = text([
+            .sessionStarted(at: at(0)),
+            .recoveryAttempted(at: at(15), trigger: "supervisor"),
+            .sessionLimitReached(at: at(10800), reason: "maxSessionDuration(3h)"),
+        ])
+
+        #expect(report.contains("復旧試行: 1"))
+        #expect(report.contains("上限に到達して終了: maxSessionDuration(3h)"))
+        #expect(report.contains("復旧を試行: supervisor"))
+        #expect(report.contains("上限に到達: maxSessionDuration(3h)"))
+    }
+
+    @Test("上限に達していないセッションでは上限の行を出さない")
+    func limitLineIsOmittedWhenNotReached() {
+        let report = text([.sessionStarted(at: at(0)), .sessionEnded(at: at(600))])
+
+        #expect(!report.contains("上限に到達して終了"))
+    }
+
     @Test("中断が全て復帰している場合は警告を出さない")
     func noWarningWhenAllInterruptionsResumed() {
         let report = text([

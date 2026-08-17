@@ -101,6 +101,10 @@ struct SessionDiagnosticsView: View {
                 row("セグメント数", "\(d.segmentCount)")
                 row("中断回数", "\(d.interruptionCount)")
                 row("復帰回数", "\(d.resumptionCount)")
+                row("復旧試行", "\(d.recoveryAttemptCount)")
+                if let limit = d.limitReachedReason {
+                    row("上限で終了", limit)
+                }
             }
 
             if !d.segmentEndReasonCounts.isEmpty {

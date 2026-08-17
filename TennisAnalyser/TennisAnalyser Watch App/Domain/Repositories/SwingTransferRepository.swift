@@ -15,6 +15,14 @@ protocol SwingTransferRepository: AnyObject {
     /// - pending: 未転送（キュー内 + ローカル残存）件数
     var onStatusChanged: ((_ transferred: Int, _ pending: Int) -> Void)? { get set }
 
+    /// iPhone への到達性の変化通知（メインスレッドで呼ばれる。F-I9-6）
+    ///
+    /// コート反対側では 20〜30m 離れ、Bluetooth が届かない。
+    /// 「転送が滞っている」のか「そもそも圏外なのか」を区別する材料になる。
+    /// - reachable: いま到達できるか
+    /// - lastContactAt: 最後に到達を確認できた時刻（一度も無ければ nil）
+    var onReachabilityChanged: ((_ reachable: Bool, _ lastContactAt: Date?) -> Void)? { get set }
+
     /// 転送セッションを有効化する（アプリ起動時に1回）
     func activate()
 

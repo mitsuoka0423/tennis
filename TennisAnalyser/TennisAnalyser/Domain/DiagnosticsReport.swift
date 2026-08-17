@@ -41,6 +41,10 @@ enum DiagnosticsReport {
         lines.append("カバー率: \(coverage)")
         lines.append("セグメント数: \(d.segmentCount)")
         lines.append("中断回数: \(d.interruptionCount) / 復帰回数: \(d.resumptionCount)")
+        lines.append("復旧試行: \(d.recoveryAttemptCount)")
+        if let limit = d.limitReachedReason {
+            lines.append("上限に到達して終了: \(limit)")
+        }
         lines.append("セグメント終了理由: \(endReasons)")
         lines.append("クリップ: 成功 \(d.clipsExtracted) / 失敗 \(d.clipsSkipped)")
         lines.append("失敗理由: \(skipReasons)")
@@ -82,6 +86,10 @@ enum DiagnosticsReport {
             return "\(time) 中断: \(reason)"
         case .interruptionEnded:
             return "\(time) 中断から復帰"
+        case .recoveryAttempted(_, let trigger):
+            return "\(time) 復旧を試行: \(trigger)"
+        case .sessionLimitReached(_, let reason):
+            return "\(time) 上限に到達: \(reason)"
         case .clipExtracted, .clipSkipped:
             return nil
         }
@@ -116,6 +124,7 @@ enum DiagnosticsReport {
         case .interrupted: return "中断"
         case .maxDuration: return "最大長に到達"
         case .error: return "エラー"
+        case .limitReached: return "上限に到達"
         }
     }
 
