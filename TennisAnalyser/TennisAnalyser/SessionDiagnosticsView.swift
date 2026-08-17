@@ -95,9 +95,9 @@ struct SessionDiagnosticsView: View {
 
         List {
             Section("録画") {
-                row("カバー率", d.coverageRatio.map(DiagnosticsReport.percent) ?? "—")
+                row("カバー率", d.coverageRatio.map { DiagnosticsReport.percent($0) } ?? "—")
                 row("録画時間", DiagnosticsReport.duration(d.recordedDuration))
-                row("セッション時間", d.sessionDuration.map(DiagnosticsReport.duration) ?? "—")
+                row("セッション時間", d.sessionDuration.map { DiagnosticsReport.duration($0) } ?? "—")
                 row("セグメント数", "\(d.segmentCount)")
                 row("中断回数", "\(d.interruptionCount)")
                 row("復帰回数", "\(d.resumptionCount)")
@@ -124,11 +124,13 @@ struct SessionDiagnosticsView: View {
             }
 
             if !timeline.isEmpty {
-                Section("出来事") {
-                    ForEach(Array(timeline.enumerated()), id: \.offset) { item in
-                        Text(item.element)
+                Section {
+                    ForEach(timeline.indices, id: \.self) { index in
+                        Text(timeline[index])
                             .font(.caption.monospaced())
                     }
+                } header: {
+                    Text("出来事")
                 } footer: {
                     if d.interruptionCount > d.resumptionCount {
                         Text("復帰しなかった中断が \(d.interruptionCount - d.resumptionCount) 件あります。以降の録画は止まったままです。")
