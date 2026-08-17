@@ -43,16 +43,38 @@ struct AnnotationReviewView: View {
 
     var body: some View {
         VStack(spacing: 12) {
+            // 進捗は常時表示のためスクロール領域の外に置く（F-I8-1）
             progressHeader
+                .padding(.horizontal)
+                .padding(.top)
 
             if isDetecting {
                 ProgressView("候補を検出中…")
                     .frame(maxHeight: .infinity)
             } else if let controller, currentEvent != nil {
-                SyncPlayerView(controller: controller, bins: bins, markers: markers)
-                candidateInfo
-                classificationButtons
-                navigationRow
+                // 動画・波形・選別ボタンの合計高さは端末によって画面に収まらない。
+                // 実機（iPhone）では却下ボタンと送りの行が下端で見切れていた。
+                //
+                // Why not 内容を縮めて収める: 波形は見落とし探しに使うため高さを削れず、
+                // ボタンはタップ目標の 44pt を下回れない。収める方向では
+                // 端末の高さが変わるたびに同じ問題が出る。
+                //
+                // Why not 候補を送るたびにスクロール位置を先頭へ戻す: 候補ごとの高さは
+                // 同じなので、一度合わせた位置はそのまま次の候補でも使える。
+                // 毎回戻すと 237件ぶんスクロールし直すことになり、
+                // 1件5秒（仕様書2章）に対して割に合わない。
+                ScrollView {
+                    VStack(spacing: 12) {
+                        SyncPlayerView(controller: controller, bins: bins, markers: markers)
+                        candidateInfo
+                        classificationButtons
+                        navigationRow
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom)
+                }
+                // 内容が収まるときは弾ませない（スクロールできると誤解させない）
+                .scrollBounceBehavior(.basedOnSize)
             } else {
                 ContentUnavailableView(
                     "候補がありません",
@@ -62,7 +84,6 @@ struct AnnotationReviewView: View {
                 .frame(maxHeight: .infinity)
             }
         }
-        .padding()
         .navigationTitle("選別")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
