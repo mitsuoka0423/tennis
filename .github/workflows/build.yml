@@ -1,0 +1,86 @@
+# ビルドとユニットテストを Mac の前に座らずに確認する
+#
+# AGENTS.md ルール5 は「コードを変更したらビルドが通ることを確認する」ことを求めるが、
+# 確認できるのが手元の Mac だけだと、変更のたびに Mac へ移動する必要がある。
+# リポジトリが public のため GitHub の macOS runner を無料で使える。
+#
+# 実機へのインストールは本ワークフローの対象外（Apple Developer Program が要る）。
+# 詳細は docs/CI.md を参照。
+
+name: build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+# 同じブランチへ続けて push したら古い実行は打ち切る
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios:
+    name: iOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 使用する Xcode を選ぶ
+        # バージョンを固定せず、runner にある最新を使う。
+        # 固定すると runner イメージの更新で「存在しない Xcode」を指して落ちる
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          xcodebuild -version
+          swift --version
+
+      - name: シミュレータを選ぶ
+        id: sim
+        run: echo "udid=$(.github/scripts/pick-simulator.sh iOS iPhone)" >> "$GITHUB_OUTPUT"
+
+      - name: ビルドとテスト
+        # UITests は起動待ちが長く CI では不安定なため、ユニットテストだけを対象にする。
+        # 署名はシミュレータでは不要（証明書を CI へ置かずに済む）
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project "TennisAnalyser/TennisAnalyser.xcodeproj" \
+            -scheme "TennisAnalyser" \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -only-testing:TennisAnalyserTests \
+            CODE_SIGNING_ALLOWED=NO
+
+  watch:
+    name: watchOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 使用する Xcode を選ぶ
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          xcodebuild -version
+
+      - name: シミュレータを選ぶ
+        id: sim
+        run: echo "udid=$(.github/scripts/pick-simulator.sh watchOS 'Apple Watch')" >> "$GITHUB_OUTPUT"
+
+      - name: シミュレータを先に起動する
+        # 2026-07-26 の知見: xcodebuild の自動起動に任せると
+        # `Unknown application display identifier` で落ちることがある。
+        # ビルド自体は成功しており、アプリの起動だけが失敗する。
+        # 先に boot を待ってから test を投げると安定する
+        run: |
+          xcrun simctl boot "${{ steps.sim.outputs.udid }}" || true
+          xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
+
+      - name: ビルドとテスト
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project "TennisAnalyser/TennisAnalyser.xcodeproj" \
+            -scheme "TennisAnalyser Watch App" \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -only-testing:"TennisAnalyser Watch AppTests" \
+            CODE_SIGNING_ALLOWED=NO

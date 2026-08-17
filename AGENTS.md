@@ -30,7 +30,11 @@
    - CLI (`xcodebuild`) と、Xcode MCP が使える場合は Xcode 経由（`BuildProject`）の両方を確認する
    - 両者の結果が食い違う場合は Xcode エディタのバッファ同期不良を疑い、
      `XcodeWrite` → `XcodeRefreshCodeIssuesInFile` → `BuildProject` の順で解消してから完了とする
-   - Xcode MCP が無い環境では、ユーザーに Xcode でのビルド確認を依頼する
+   - **手元に Xcode が無い環境では GitHub Actions の結果を確認すること**（`.github/workflows/build.yml`）。
+     push すると iOS・watchOS の両方をシミュレータでビルドしてユニットテストを回す。
+     ユーザーへ確認を依頼するのは、CI が通ったうえで実機の挙動が要る場合に限る
+   - CI が担保するのはビルドとユニットテストのみ。センサー計測・カメラ録画・
+     デバイス間通信はシミュレータで確認できない。詳細は [docs/CI.md](TennisAnalyser/docs/CI.md)
 
 ## ガイドライン
 
