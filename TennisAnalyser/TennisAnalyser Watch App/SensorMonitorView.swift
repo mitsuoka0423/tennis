@@ -9,9 +9,14 @@ import SwiftUI
 /// 加速度3軸・角速度3軸を軸ごとの波形として実時間で表示するデモ画面
 ///
 /// 画面を開いている間だけサンプリングし、保存も転送も行わない。
+///
+/// **1画面1グラフ。** 波形を画面いっぱいに敷き、加速度と角速度は左右の
+/// スワイプで入れ替える。2枚を縦に並べていたときは1枚あたりの高さが
+/// 66pt しか取れず、振り切れているのか小さく振れているのかが読めなかった。
 struct SensorMonitorView: View {
 
     @StateObject private var viewModel: SensorMonitorViewModel
+    @State private var page: MonitorPage = .acceleration
     @State private var isAlertPresented = false
 
     /// - Parameter viewModel: プレビューやテストで差し替える場合に指定する
@@ -24,33 +29,24 @@ struct SensorMonitorView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 10) {
-                traceSection(
-                    title: "加速度",
-                    unit: "g",
-                    trace: viewModel.accelerationTrace,
-                    scale: viewModel.accelerationScale,
-                    scaleLabel: SensorChartScale.accelerationLabel(viewModel.accelerationScale),
-                    format: "%+.2f",
-                    values: (viewModel.latest?.accX, viewModel.latest?.accY, viewModel.latest?.accZ)
-                )
-
-                traceSection(
-                    title: "角速度",
-                    unit: "°/s",
-                    trace: viewModel.rotationTrace,
-                    scale: viewModel.rotationScale,
-                    scaleLabel: SensorChartScale.rotationLabel(viewModel.rotationScale),
-                    format: "%+.0f",
-                    values: (viewModel.latest?.gyroX, viewModel.latest?.gyroY, viewModel.latest?.gyroZ)
-                )
-
-                footer
+        ZStack(alignment: .bottom) {
+            TabView(selection: $page) {
+                ForEach(MonitorPage.allCases) { item in
+                    chart(for: item)
+                        .tag(item)
+                }
             }
-            .padding(.horizontal, 8)
+            // ページ表示は下端の状態行に自前で置くため、標準のドットは出さない
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            // 波形はナビゲーションバーの下も含めて画面いっぱいに敷く
+            .ignoresSafeArea()
+
+            // Why not 下端の情報もページの中へ入れる: ページを跨いで動かない
+            // 位置に置くため。スワイプで入れ替わるのは波形だけにする
+            footer(page)
         }
-        .navigationTitle("モニター")
+        .navigationTitle(page.title)
+        .navigationBarTitleDisplayMode(.inline)
         .alert("エラー", isPresented: $isAlertPresented) {
             Button("OK") { viewModel.clearError() }
         } message: {
@@ -63,51 +59,27 @@ struct SensorMonitorView: View {
         .onDisappear { viewModel.stop() }
     }
 
-    // MARK: - 波形1組（3軸を重ねた1枚 + 現在値）
+    // MARK: - 1ページ（波形1枚）
 
-    private func traceSection(
-        title: String,
-        unit: String,
-        trace: AxisTrace,
-        scale: Double,
-        scaleLabel: String,
-        format: String,
-        values: (Double?, Double?, Double?)
-    ) -> some View {
-        VStack(spacing: 5) {
-            HStack(spacing: 4) {
-                Text(title)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white)
-                Text(unit)
-                    .font(.system(size: 10))
-                    .foregroundStyle(GlassPalette.label)
-                Spacer()
-                // 目盛りが動くため、いま何倍で見ているかを常に添える
-                Text(scaleLabel)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(GlassPalette.info)
-                    .animation(.default, value: scaleLabel)
-            }
-
-            AxisTraceChart(trace: trace, scale: scale, capacity: viewModel.traceCapacity)
-                .frame(height: 66)
-                .padding(3)
-                .glassSurface(cornerRadius: 12)
-
-            HStack(spacing: 0) {
-                AxisValue(label: "X", value: values.0, format: format, color: SensorAxisColor.x)
-                AxisValue(label: "Y", value: values.1, format: format, color: SensorAxisColor.y)
-                AxisValue(label: "Z", value: values.2, format: format, color: SensorAxisColor.z)
-            }
-        }
+    private func chart(for item: MonitorPage) -> some View {
+        AxisTraceChart(
+            trace: trace(for: item),
+            scale: scale(for: item),
+            capacity: viewModel.traceCapacity
+        )
     }
 
-    // MARK: - 状態と操作
-
-    private var footer: some View {
+    /// 下端の情報。波形と重なるため、黒へ落ちる幕を敷いて文字を載せる
+    private func footer(_ item: MonitorPage) -> some View {
         VStack(spacing: 6) {
-            HStack(spacing: 4) {
+            HStack(spacing: 0) {
+                let values = latestValues(for: item)
+                AxisValue(label: "X", value: values.0, format: item.format, color: SensorAxisColor.x)
+                AxisValue(label: "Y", value: values.1, format: item.format, color: SensorAxisColor.y)
+                AxisValue(label: "Z", value: values.2, format: item.format, color: SensorAxisColor.z)
+            }
+
+            HStack(spacing: 5) {
                 Circle()
                     .fill(viewModel.isRunning ? GlassPalette.accent : GlassPalette.label)
                     .frame(width: 6, height: 6)
@@ -115,21 +87,122 @@ struct SensorMonitorView: View {
                 Text(viewModel.isRunning ? "取得中" : "停止中")
                     .font(.system(size: 11))
                     .foregroundStyle(GlassPalette.label)
-                Spacer()
-                Text(viewModel.measuredHz > 0 ? String(format: "%.0f Hz", viewModel.measuredHz) : "--- Hz")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(GlassPalette.label)
-            }
 
-            GlassBarButton(
-                title: viewModel.isRunning ? "一時停止" : "再開",
-                tint: viewModel.isRunning ? GlassPalette.caution : GlassPalette.accent
-            ) {
-                if viewModel.isRunning {
-                    viewModel.stop()
-                } else {
-                    viewModel.start()
-                }
+                Spacer(minLength: 0)
+
+                Text(item.unit)
+                    .font(.system(size: 10))
+                    .foregroundStyle(GlassPalette.label)
+                // 目盛りが動くため、いま何倍で見ているかを常に添える
+                Text(scaleLabel(for: item))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(GlassPalette.info)
+                    .animation(.default, value: scaleLabel(for: item))
+
+                PageDots(selected: item)
+                    .padding(.leading, 4)
+            }
+        }
+        .padding(.top, 18)
+        .padding(.horizontal, 8)
+        .padding(.bottom, 6)
+        .background {
+            // 幕は画面の下端まで伸ばす。安全領域で止めると、その下に残る
+            // 波形だけが素のまま明るく見える
+            LinearGradient(
+                stops: [
+                    .init(color: .black.opacity(0.85), location: 0),
+                    .init(color: .black.opacity(0.85), location: 0.55),
+                    .init(color: .clear, location: 1)
+                ],
+                startPoint: .bottom,
+                endPoint: .top
+            )
+            .ignoresSafeArea(edges: .bottom)
+        }
+    }
+
+    // MARK: - ページごとの値
+
+    private func trace(for item: MonitorPage) -> AxisTrace {
+        switch item {
+        case .acceleration: viewModel.accelerationTrace
+        case .rotation: viewModel.rotationTrace
+        }
+    }
+
+    private func scale(for item: MonitorPage) -> Double {
+        switch item {
+        case .acceleration: viewModel.accelerationScale
+        case .rotation: viewModel.rotationScale
+        }
+    }
+
+    private func scaleLabel(for item: MonitorPage) -> String {
+        switch item {
+        case .acceleration: SensorChartScale.accelerationLabel(viewModel.accelerationScale)
+        case .rotation: SensorChartScale.rotationLabel(viewModel.rotationScale)
+        }
+    }
+
+    private func latestValues(for item: MonitorPage) -> (Double?, Double?, Double?) {
+        switch item {
+        case .acceleration:
+            (viewModel.latest?.accX, viewModel.latest?.accY, viewModel.latest?.accZ)
+        case .rotation:
+            (viewModel.latest?.gyroX, viewModel.latest?.gyroY, viewModel.latest?.gyroZ)
+        }
+    }
+}
+
+// MARK: - MonitorPage
+
+/// モニターのページ。1ページ＝1グラフ
+enum MonitorPage: Int, CaseIterable, Identifiable {
+    case acceleration
+    case rotation
+
+    var id: Int { rawValue }
+
+    /// ナビゲーションバーのタイトルを兼ねる
+    var title: String {
+        switch self {
+        case .acceleration: "加速度"
+        case .rotation: "角速度"
+        }
+    }
+
+    var unit: String {
+        switch self {
+        case .acceleration: "g"
+        case .rotation: "°/s"
+        }
+    }
+
+    var format: String {
+        switch self {
+        case .acceleration: "%+.2f"
+        case .rotation: "%+.0f"
+        }
+    }
+}
+
+// MARK: - PageDots
+
+/// いま何ページ目かを示す点
+///
+/// Why not `TabView` 標準の点をそのまま使う: 標準の点は画面の下端中央に
+/// 独立して置かれ、下端の情報と行が二段になる。状態・単位・目盛りと
+/// 同じ行に収めるため自前で描く。
+private struct PageDots: View {
+    let selected: MonitorPage
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(MonitorPage.allCases) { item in
+                Circle()
+                    .fill(item == selected ? GlassPalette.accent : .white.opacity(0.25))
+                    .frame(width: 5, height: 5)
             }
         }
     }
@@ -166,7 +239,7 @@ private struct AxisTraceChart: View {
             var baseline = Path()
             baseline.move(to: CGPoint(x: 0, y: midY))
             baseline.addLine(to: CGPoint(x: size.width, y: midY))
-            context.stroke(baseline, with: .color(.white.opacity(0.16)), lineWidth: 1)
+            context.stroke(baseline, with: .color(.white.opacity(0.14)), lineWidth: 1)
 
             guard capacity > 1, !trace.isEmpty else { return }
 
@@ -179,7 +252,7 @@ private struct AxisTraceChart: View {
                     // 右端を最新にするため、末尾からの距離で位置を決める
                     let x = size.width - Double(count - 1 - index) * step
                     let clamped = max(min(value / scale, 1.0), -1.0)
-                    let y = midY - clamped * (size.height / 2 - 1)
+                    let y = midY - clamped * (size.height / 2 - 3)
                     if index == 0 {
                         path.move(to: CGPoint(x: x, y: y))
                     } else {
@@ -189,17 +262,16 @@ private struct AxisTraceChart: View {
                 return path
             }
 
-            let style = StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round)
-
             // 奥から Z→Y→X。X（振りの主成分）を最前面に置く
-            for (values, color) in [
-                (trace.z, SensorAxisColor.z),
-                (trace.y, SensorAxisColor.y),
-                (trace.x, SensorAxisColor.x)
+            for (values, color, width) in [
+                (trace.z, SensorAxisColor.z, 2.0),
+                (trace.y, SensorAxisColor.y, 2.0),
+                (trace.x, SensorAxisColor.x, 2.2)
             ] {
                 let line = path(for: values)
+                let style = StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round)
                 context.drawLayer { layer in
-                    layer.addFilter(.shadow(color: color.opacity(0.7), radius: 3))
+                    layer.addFilter(.shadow(color: color.opacity(0.6), radius: 4))
                     layer.stroke(line, with: .color(color), style: style)
                 }
             }
@@ -217,7 +289,7 @@ private struct AxisValue: View {
     let color: Color
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 3) {
             Text(label)
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundStyle(color)
@@ -267,15 +339,26 @@ private struct MockedSensorMonitorPreview: View {
     let fitted = SensorChartScale.fit(
         peak: trace.peakMagnitude, minimum: SensorChartScale.accelerationMinimum
     )
-    return VStack(spacing: 10) {
-        AxisTraceChart(trace: trace, scale: fitted, capacity: capacity)
-            .frame(height: 66)
-            .padding(3)
-            .glassSurface(cornerRadius: 12)
-        AxisTraceChart(trace: trace, scale: SensorChartScale.accelerationMinimum, capacity: capacity)
-            .frame(height: 66)
-            .padding(3)
-            .glassSurface(cornerRadius: 12)
+    // 画面いっぱいに敷いたときの線の太さと発光を、実寸で確認する
+    return AxisTraceChart(trace: trace, scale: fitted, capacity: capacity)
+        .ignoresSafeArea()
+}
+
+#Preview("波形（下限スケール）") {
+    // 自動スケールを効かせず、振り切れた見え方と比較する
+    let capacity = 150
+    var trace = AxisTrace()
+    for index in 0..<capacity {
+        let t = Double(index) / Double(capacity)
+        trace.append(
+            x: 6 * sin(t * .pi * 6),
+            y: 3 * cos(t * .pi * 4),
+            z: -1 + 2 * sin(t * .pi * 10),
+            capacity: capacity
+        )
     }
-    .padding(8)
+    return AxisTraceChart(
+        trace: trace, scale: SensorChartScale.accelerationMinimum, capacity: capacity
+    )
+    .ignoresSafeArea()
 }

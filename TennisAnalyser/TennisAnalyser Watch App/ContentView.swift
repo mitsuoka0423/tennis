@@ -112,7 +112,9 @@ private struct StandbyView: View {
                     .foregroundStyle(GlassPalette.label)
             }
         } action: {
-            GlassBarButton(title: "計測開始", glyph: .record, tint: GlassPalette.accent) {
+            GlassBarButton(
+                title: "計測開始", glyph: .record, kind: .prominent, tint: GlassPalette.accent
+            ) {
                 viewModel.start()
             }
         }
@@ -150,84 +152,215 @@ private struct MeasureScreen<Content: View, Action: View>: View {
 
 /// 計測中の画面（リアルタイム表示 + 停止ボタン）
 ///
-/// 経過時間を中心に置き、レートの健全性はリングの弧で示す（カタログ 1g）。
-/// 動いている間に読むのは「まだ録れているか」だけなので、数値の一覧より
-/// 一目で欠けが分かる形を採る。
+/// 要点であるスイング数を先に置き、その内訳を時系列の棒で下に添える
+/// （HIG Charts）。動いている間に読むのは「録れているか」と「振れているか」の
+/// 2つだけなので、経過時間とレートは状態行へ退ける。
 private struct RecordingView: View {
     @ObservedObject var viewModel: WorkoutViewModel
 
     var body: some View {
+        RecordingLayout(
+            elapsedText: viewModel.elapsedTimeString,
+            swingCount: viewModel.swingCount,
+            pendingTransferCount: viewModel.pendingTransferCount,
+            measuredHz: viewModel.measuredHz,
+            lossRate: viewModel.lossRate,
+            buckets: viewModel.swingBuckets,
+            onStop: { viewModel.stop() }
+        )
+    }
+}
+
+/// 計測中の表示そのもの
+///
+/// Why not `RecordingView` に直接書く: 計測中の値は `WorkoutViewModel` の
+/// 外から入れられず、プレビューでこの画面を出すには実際にセンサーを回して
+/// 待つしかなかった。値を引数で受け、見た目だけを単体で確認できるようにする。
+private struct RecordingLayout: View {
+    let elapsedText: String
+    let swingCount: Int
+    let pendingTransferCount: Int
+    let measuredHz: Double
+    let lossRate: Double
+    let buckets: [Int?]
+    let onStop: () -> Void
+
+    @State private var isBlinkOn = false
+
+    var body: some View {
         MeasureScreen {
-            VStack(spacing: 6) {
-                // W-1: 高さが足りない機種・文字サイズではリングを一段小さくする。
-                // 縮むのはリングだけで、ボタンの位置は動かない
-                ViewThatFits(in: .vertical) {
-                    ring(diameter: 118, timeSize: 30)
-                    ring(diameter: 100, timeSize: 26)
-                    ring(diameter: 84, timeSize: 22)
+            VStack(alignment: .leading, spacing: 0) {
+                statusRow
+
+                Text("スイング")
+                    .font(.system(size: 11))
+                    .foregroundStyle(GlassPalette.secondaryText)
+                    .padding(.top, 10)
+
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text("\(swingCount)")
+                        .font(.system(size: 34, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white)
+                    Text("回")
+                        .font(.system(size: 12))
+                        .foregroundStyle(GlassPalette.secondaryText)
+                    Spacer(minLength: 0)
+                    Text("直近15秒 \(latestBucket)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(GlassPalette.secondaryText)
                 }
 
-                Text(rateText)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(viewModel.measuredHz > 0 ? rateColor : GlassPalette.label)
+                SwingBarChart(buckets: buckets)
+                    .padding(.top, 8)
+
+                axisRow
+
+                Spacer(minLength: 0)
             }
         } action: {
-            GlassBarButton(title: "停止・保存", glyph: .stop, tint: GlassPalette.danger) {
-                viewModel.stop()
+            GlassBarButton(
+                title: "停止・保存", glyph: .stop, kind: .tinted, tint: GlassPalette.danger
+            ) {
+                onStop()
             }
         }
     }
 
-    /// 経過時間を囲むリング。弧の長さがレートの健全性を表す
-    private func ring(diameter: CGFloat, timeSize: CGFloat) -> some View {
-        ZStack {
+    /// 録れているかを示す行。点滅する点・経過時間・実測レート
+    private var statusRow: some View {
+        HStack(spacing: 5) {
+            // リングを廃したため、記録が続いていることを示すのはこの点だけになる
             Circle()
-                .stroke(Color.white.opacity(0.08), lineWidth: 6)
+                .fill(GlassPalette.danger)
+                .frame(width: 7, height: 7)
+                .opacity(isBlinkOn ? 1 : 0.25)
+                .animation(.easeInOut(duration: 0.7).repeatForever(), value: isBlinkOn)
+                .onAppear { isBlinkOn = true }
 
-            Circle()
-                .trim(from: 0, to: rateHealth)
-                .stroke(rateColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .shadow(color: rateColor.opacity(0.55), radius: 4)
+            Text(elapsedText)
+                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                .foregroundStyle(GlassPalette.text.opacity(0.7))
 
-            VStack(spacing: 0) {
-                Text(viewModel.elapsedTimeString)
-                    .font(.system(size: timeSize, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white)
-                Text("スイング \(swingStatValue)")
-                    .font(.system(size: 10))
-                    .foregroundStyle(GlassPalette.label)
-            }
+            Spacer(minLength: 0)
+
+            // W-3: 転送の滞りは残件数で示す。転送前後で表記を変えない
+            Text("残 \(pendingTransferCount)")
+                .font(.system(size: 11))
+                .foregroundStyle(GlassPalette.tertiaryText)
+
+            Text(rateText)
+                .font(.system(size: 11))
+                .foregroundStyle(rateColor)
         }
-        .frame(width: diameter, height: diameter)
     }
 
-    /// スイング数と転送状況の表示
-    /// W-3: 転送前後で表記を変えず常に "n (残m)" 形式で統一
-    private var swingStatValue: String {
-        "\(viewModel.swingCount) (残\(viewModel.pendingTransferCount))"
+    /// 直近の窓のスイング数。最新の棒がどれかを色だけに頼らず示す
+    private var latestBucket: Int {
+        buckets.compactMap { $0 }.last ?? 0
+    }
+
+    /// 棒グラフの時間軸。両端と、破線が指す平均だけを添える
+    private var axisRow: some View {
+        HStack {
+            Text("-3分")
+            Spacer(minLength: 0)
+            Text(String(format: "平均 %.1f", averageSwings))
+            Spacer(minLength: 0)
+            Text("現在")
+        }
+        .font(.system(size: 9))
+        .foregroundStyle(GlassPalette.tertiaryText)
+        .padding(.top, 3)
+    }
+
+    private var averageSwings: Double {
+        let values = buckets.compactMap { $0 }
+        guard !values.isEmpty else { return 0 }
+        return Double(values.reduce(0, +)) / Double(values.count)
     }
 
     private var rateText: String {
-        guard viewModel.measuredHz > 0 else { return "レート測定中" }
-        return String(format: "%.0f Hz ・ ロス %@", viewModel.measuredHz, viewModel.lossRateString)
-    }
-
-    /// リングの弧が示すレートの健全性（0…1）
-    ///
-    /// ロス率 0% で全周、5% 以上で消える。5% は赤の境界であり、
-    /// そこまで来たら弧の長さより色で気づく。
-    private var rateHealth: Double {
-        guard viewModel.measuredHz > 0 else { return 0 }
-        return 1 - min(viewModel.lossRate / 0.05, 1)
+        guard measuredHz > 0 else { return "--- Hz" }
+        return String(format: "%.0f Hz", measuredHz)
     }
 
     /// ロス率に応じた色: 1%未満=緑、5%未満=黄、それ以上=赤
+    ///
+    /// Why not レートを常に同じ濃度の白で出す: ロス率の数値を置く場所が
+    /// 無くなったため、健全かどうかはこの色でしか分からない。
     private var rateColor: Color {
-        guard viewModel.measuredHz > 0 else { return GlassPalette.label }
-        if viewModel.lossRate < 0.01 { return GlassPalette.accent }
-        if viewModel.lossRate < 0.05 { return GlassPalette.warning }
+        guard measuredHz > 0 else { return GlassPalette.tertiaryText }
+        if lossRate < 0.01 { return GlassPalette.text.opacity(0.5) }
+        if lossRate < 0.05 { return GlassPalette.warning }
         return GlassPalette.danger
+    }
+}
+
+// MARK: - SwingBarChart
+
+/// 15秒ごとのスイング数を並べた棒グラフ
+///
+/// 最新の窓だけを濃い緑にし、残りは 45% へ落とす。色だけに頼らず
+/// 「直近15秒」の数値も添えるため、どれが最新かは両方から読める。
+///
+/// Why not `Chart`（Swift Charts）を使う: 目盛りも凡例も出さない 12 本の棒に
+/// 対して、軸の描画を止める指定のほうが記述量が多くなる。
+private struct SwingBarChart: View {
+    /// 右端が現在の窓。`nil` は計測開始前で、記録が無いこと自体を薄い棒で示す
+    let buckets: [Int?]
+
+    private var values: [Int] { buckets.compactMap { $0 } }
+
+    /// 縦軸の上限。1窓 12回（4秒に1回）を下限に、超えたら実測へ合わせる
+    private var upperBound: Double { Double(max(12, values.max() ?? 0)) }
+
+    private var average: Double {
+        guard !values.isEmpty else { return 0 }
+        return Double(values.reduce(0, +)) / Double(values.count)
+    }
+
+    /// 最新の窓の位置。ここだけ濃く塗る
+    private var latestIndex: Int? {
+        buckets.lastIndex { $0 != nil }
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .bottom) {
+                HStack(alignment: .bottom, spacing: 3) {
+                    ForEach(Array(buckets.enumerated()), id: \.offset) { index, value in
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .fill(color(index: index, value: value))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: height(of: value, in: geometry.size.height))
+                    }
+                }
+
+                if !values.isEmpty {
+                    Path { path in
+                        path.move(to: CGPoint(x: 0, y: 0.5))
+                        path.addLine(to: CGPoint(x: geometry.size.width, y: 0.5))
+                    }
+                    .stroke(
+                        GlassPalette.text.opacity(0.35),
+                        style: StrokeStyle(lineWidth: 1, dash: [2, 2])
+                    )
+                    .frame(height: 1)
+                    .offset(y: -average / upperBound * geometry.size.height)
+                }
+            }
+        }
+        .frame(height: 54)
+    }
+
+    private func height(of value: Int?, in available: CGFloat) -> CGFloat {
+        guard let value else { return 2 }
+        return max(2, Double(value) / upperBound * available)
+    }
+
+    private func color(index: Int, value: Int?) -> Color {
+        guard value != nil else { return .white.opacity(0.06) }
+        return index == latestIndex ? GlassPalette.accent : GlassPalette.accent.opacity(0.45)
     }
 }
 
@@ -238,6 +371,19 @@ private struct RecordingView: View {
     NavigationStack {
         ContentView()
     }
+}
+
+#Preview("計測中の表示") {
+    // 見た目の確認用。センサーの到着を待たずに、値が揃った状態を出す
+    RecordingLayout(
+        elapsedText: "03:07",
+        swingCount: 96,
+        pendingTransferCount: 2,
+        measuredHz: 198,
+        lossRate: 0.008,
+        buckets: [nil, nil, nil, 4, 9, 7, 12, 6, 0, 8, 11, 5],
+        onStop: {}
+    )
 }
 
 #Preview("計測中") {

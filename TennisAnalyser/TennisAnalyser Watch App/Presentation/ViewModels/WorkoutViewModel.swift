@@ -29,6 +29,9 @@ final class WorkoutViewModel: ObservableObject {
     @Published private(set) var isStarting: Bool = false
     /// 検知済みスイング数
     @Published private(set) var swingCount: Int = 0
+    /// 直近3分を15秒ごとに区切ったスイング数。右端が現在の窓、`nil` は計測開始前の窓
+    @Published private(set) var swingBuckets: [Int?] =
+        Array(repeating: nil, count: WorkoutViewModel.swingBucketCount)
     /// iPhone へ転送完了したスイング数
     @Published private(set) var transferredCount: Int = 0
     /// 未転送（キュー内 + ローカル残存）のスイング数
@@ -46,11 +49,21 @@ final class WorkoutViewModel: ObservableObject {
     /// true にするとシミュレータ用モックリポジトリを使用する
     let useMock: Bool
 
+    /// スイング数を数える窓の長さ (秒)
+    ///
+    /// 素振りの間隔（数秒）より長く、調子の変化が見える程度に短い刻み。
+    static let swingBucketSeconds = 15
+    /// 画面へ残す窓の数（15秒 × 12 = 3分）
+    static let swingBucketCount = 12
+
     // MARK: - Private
 
     private let transferRepo: any SwingTransferRepository
     private var timerTask: Task<Void, Never>?
     private var startDate: Date?
+
+    /// 計測開始からの全窓のスイング数。末尾が進行中の窓
+    private var elapsedBuckets: [Int] = []
 
     // MARK: - Init
 
@@ -183,7 +196,10 @@ final class WorkoutViewModel: ObservableObject {
         }
         Task { @MainActor in
             for await count in recordSessionUseCase.$swingCount.values {
+                let added = count - self.swingCount
                 self.swingCount = count
+                // セッション開始時に 0 へ戻るため、増えたときだけ窓へ積む
+                if added > 0 { self.addSwings(added) }
             }
         }
         Task { @MainActor in
@@ -199,6 +215,8 @@ final class WorkoutViewModel: ObservableObject {
         elapsedSeconds = 0
         measuredHz = 0.0
         lossRate = 0.0
+        elapsedBuckets = []
+        publishBuckets()
 
         timerTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -207,8 +225,38 @@ final class WorkoutViewModel: ObservableObject {
                 self.elapsedSeconds += 1
                 // 1秒ごとに実測Hz・ロス率をリアルタイム更新
                 self.updateStats()
+                // スイングが1本も出ない窓も時間の経過として送り出す
+                self.openBucketsUpToNow()
+                self.publishBuckets()
             }
         }
+    }
+
+    /// 検知されたスイングを進行中の窓へ積む
+    private func addSwings(_ count: Int) {
+        openBucketsUpToNow()
+        elapsedBuckets[elapsedBuckets.count - 1] += count
+        publishBuckets()
+    }
+
+    /// いまの経過時間に対応する窓まで配列を伸ばす
+    private func openBucketsUpToNow() {
+        let index = elapsedSeconds / Self.swingBucketSeconds
+        while elapsedBuckets.count <= index {
+            elapsedBuckets.append(0)
+        }
+    }
+
+    /// 直近 `swingBucketCount` 個の窓を右詰めで公開する
+    ///
+    /// 窓が足りないうちは左を `nil` で埋める。時間軸の目盛り（-3分〜現在）を
+    /// 一定に保ち、開始直後に棒が横へ引き伸ばされないようにするため。
+    private func publishBuckets() {
+        let tail = elapsedBuckets.suffix(Self.swingBucketCount).map { Optional($0) }
+        let padding = Array<Int?>(
+            repeating: nil, count: max(0, Self.swingBucketCount - tail.count)
+        )
+        swingBuckets = padding + tail
     }
 
     private func stopTimer() {

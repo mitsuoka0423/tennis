@@ -23,13 +23,13 @@ struct RootView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 6) {
+                VStack(spacing: 20) {
                     NavigationLink {
                         ContentView(workoutSessionManager: workoutSessionManager)
                     } label: {
-                        MenuRow(
+                        ModeCard(
                             title: "計測",
-                            detail: "スイングを記録する",
+                            detail: "スイングを記録",
                             systemImage: "figure.tennis",
                             tint: GlassPalette.accent
                         )
@@ -39,63 +39,85 @@ struct RootView: View {
                     NavigationLink {
                         SensorMonitorView()
                     } label: {
-                        MenuRow(
+                        ModeCard(
                             title: "モニター",
-                            detail: "加速度・角速度を波形で見る",
+                            detail: "波形を見る",
                             systemImage: "waveform.path.ecg",
                             tint: GlassPalette.info
                         )
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 6)
+                .padding(.horizontal, 10)
+                .scrollTargetLayout()
             }
+            .scrollTargetBehavior(.viewAligned)
             .navigationTitle("Tennis Analyser")
+            // Why not 大きいタイトルのまま送る: 起動直後に見せたいのはカード2枚で、
+            // 大タイトルは1枚目の下半分を画面外へ押し出す
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }
 
-// MARK: - MenuRow
+// MARK: - ModeCard
 
-/// 用途を選ぶ行
+/// 用途を選ぶカード
 ///
-/// Why not `List` のまま組む: 行の背景と選択時のハイライトが標準のグレーで
+/// 手前に来た1枚だけを不透明で描き、外れた枚は 60% へ落とす。Digital Crown で
+/// 送ったとき、いま選んでいるのがどれかを位置ではなく濃さで示すため。
+///
+/// Why not `List` の行にする: 行の背景と選択時のハイライトが標準のグレーで
 /// 描かれ、ガラスの面がその上に重なって二重の板に見える。面をこちらで
 /// 敷くため、素の `ScrollView` に置いている。
-private struct MenuRow: View {
+private struct ModeCard: View {
     let title: String
     let detail: String
     let systemImage: String
     let tint: Color
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: 22, height: 22)
-                .background(
-                    tint.opacity(0.13),
-                    in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-                )
-                .overlay {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(tint.opacity(0.40), lineWidth: 0.5)
-                }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 0) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 26, height: 26)
+                    .background(
+                        tint.opacity(0.16),
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(tint.opacity(0.45), lineWidth: 0.5)
+                    }
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                Text(detail)
-                    .font(.system(size: 10))
-                    .foregroundStyle(GlassPalette.label)
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.forward")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(tint)
+                    .frame(width: 18, height: 18)
+                    .background(tint.opacity(0.2), in: Circle())
             }
+
             Spacer(minLength: 0)
+
+            Text(title)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+            Text(detail)
+                .font(.system(size: 12))
+                .foregroundStyle(GlassPalette.secondaryText)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-        .glassSurface()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(height: 92, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .listGlass()
+        .scrollTransition { content, phase in
+            content.opacity(phase.isIdentity ? 1 : 0.6)
+        }
     }
 }
 
