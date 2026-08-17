@@ -1,0 +1,129 @@
+# TestFlight へビルドを上げる（Mac 不要）
+#
+# 手動実行のみ。push のたびに上げない理由は3つ。
+#   1. TestFlight のビルドは90日で失効する。作り置きしても意味が薄い
+#   2. アップロード後に App Store Connect の処理が数分〜30分かかる。
+#      「コートに向かう直前にビルド」は成立せず、前日に回す運用になる
+#   3. ビルド番号を消費する。巻き戻せない
+#
+# 実行は GitHub の画面（スマートフォンのブラウザでも可）から
+# Actions → testflight → Run workflow。Mac の前に座る必要はない。
+#
+# 必要な Secrets と初期設定は docs/CI.md を参照。
+
+name: testflight
+
+on:
+  workflow_dispatch:
+
+jobs:
+  upload:
+    name: アーカイブして TestFlight へ
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    env:
+      ARCHIVE_PATH: ${{ github.workspace }}/build/TennisAnalyser.xcarchive
+      EXPORT_PATH: ${{ github.workspace }}/build/export
+      KEY_PATH: ${{ github.workspace }}/build/AuthKey.p8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 使用する Xcode を選ぶ
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          xcodebuild -version
+
+      # 壊れたビルドをコートへ持って行くと、練習1回ぶんが無駄になる。
+      # アーカイブ前にユニットテストを通す
+      - name: シミュレータを選ぶ
+        id: sim
+        run: echo "udid=$(.github/scripts/pick-simulator.sh iOS iPhone)" >> "$GITHUB_OUTPUT"
+
+      - name: ユニットテスト
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project "TennisAnalyser/TennisAnalyser.xcodeproj" \
+            -scheme "TennisAnalyser" \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -only-testing:TennisAnalyserTests \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: App Store Connect API キーを配置する
+        env:
+          KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+        run: |
+          mkdir -p "$(dirname "$KEY_PATH")"
+          printf '%s' "$KEY_P8" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+
+      - name: アーカイブする
+        # -allowProvisioningUpdates と API キーの組み合わせで、証明書と
+        # プロビジョニングプロファイルを CI 側で発行・取得する。
+        # Mac の Keychain から .p12 を書き出して Secrets へ入れる手順が要らない。
+        #
+        # ビルド番号は GitHub の実行番号を使う。TestFlight は同じ番号を受け付けず、
+        # 単調増加が要る。プロジェクトの CURRENT_PROJECT_VERSION は固定値のため
+        # ファイルを書き換えず、コマンドラインで上書きする。
+        #
+        # Watch App は iOS アプリに同梱されるため、アーカイブは iOS スキーム1本でよい。
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project "TennisAnalyser/TennisAnalyser.xcodeproj" \
+            -scheme "TennisAnalyser" \
+            -destination "generic/platform=iOS" \
+            -archivePath "$ARCHIVE_PATH" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "${{ secrets.APP_STORE_CONNECT_KEY_ID }}" \
+            -authenticationKeyIssuerID "${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}" \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }}
+
+      - name: 書き出して TestFlight へ上げる
+        # destination = upload により、-exportArchive がそのまま
+        # App Store Connect へ送る（altool を別途呼ばない）。
+        # manageAppVersionAndBuildNumber = false は、上で指定したビルド番号を
+        # Xcode 側に勝手に振り直させないため。
+        run: |
+          set -o pipefail
+          cat > "${{ github.workspace }}/build/ExportOptions.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "$EXPORT_PATH" \
+            -exportOptionsPlist "${{ github.workspace }}/build/ExportOptions.plist" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "${{ secrets.APP_STORE_CONNECT_KEY_ID }}" \
+            -authenticationKeyIssuerID "${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}"
+
+      - name: 結果を残す
+        if: always()
+        run: |
+          {
+            echo "## TestFlight"
+            echo ""
+            echo "- ビルド番号: \`${{ github.run_number }}\`"
+            echo "- コミット: \`${{ github.sha }}\`"
+            echo ""
+            echo "App Store Connect の処理に数分〜30分かかる。"
+            echo "iPhone の TestFlight アプリに出たらインストールできる。"
+            echo "Apple Watch へは iPhone の Watch アプリ経由で入る。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 鍵を消す
+        if: always()
+        run: rm -f "$KEY_PATH"

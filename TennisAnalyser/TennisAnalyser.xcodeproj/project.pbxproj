@@ -620,6 +620,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = TennisAnalyser;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "テニスのスイング解析のため、ワークアウトデータを読み取ります。";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "テニスのワークアウトセッションを記録します。";
 				INFOPLIST_KEY_NSMotionUsageDescription = "テニスのスイング動作を計測するため、加速度センサーおよびジャイロスコープを使用します。";
@@ -658,6 +659,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = TennisAnalyser;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "テニスのスイング解析のため、ワークアウトデータを読み取ります。";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "テニスのワークアウトセッションを記録します。";
 				INFOPLIST_KEY_NSMotionUsageDescription = "テニスのスイング動作を計測するため、加速度センサーおよびジャイロスコープを使用します。";
@@ -697,6 +699,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = TennisAnalyser;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSCameraUsageDescription = "スイングのスロー動画を撮影し、波形と同期表示するためにカメラを使用します。";
 				INFOPLIST_KEY_NSMotionUsageDescription = "テニスのスイング動作を計測するため、加速度センサーおよびジャイロスコープを使用します。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -735,6 +738,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = TennisAnalyser;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSCameraUsageDescription = "スイングのスロー動画を撮影し、波形と同期表示するためにカメラを使用します。";
 				INFOPLIST_KEY_NSMotionUsageDescription = "テニスのスイング動作を計測するため、加速度センサーおよびジャイロスコープを使用します。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
