@@ -43,15 +43,20 @@ final class VideoStore: ObservableObject {
 
     private static let manifestName = "manifest.json"
 
+    // Why not `.iso8601`: 小数秒を捨てるため、`RecordingSegment.startedAt` が
+    // 秒に丸まる。動画の再生位置は `再生時刻 - startedAt` で決まるので、
+    // そのセグメント全体が最大1秒ずれる（F-I9-9）。
+    // セッション中は sessions（メモリ上）が完全精度を保つため、
+    // ずれが表面化するのは manifest を読み直したあと＝アノテーション時である。
     private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = ISO8601DateCoding.encodingStrategy
         return encoder
     }()
 
     private static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = ISO8601DateCoding.decodingStrategy
         return decoder
     }()
 

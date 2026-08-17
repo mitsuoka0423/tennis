@@ -96,13 +96,7 @@ enum ContinuousChunkParser {
     }
 
     /// ISO8601（小数秒あり／なしの双方）をパースする
-    ///
-    /// 小数秒つきは `ISO8601DateFormatter` の既定オプションでは解釈できないため、
-    /// 明示指定した formatter を先に試す。
     nonisolated private static func parseDate(_ value: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = fractional.date(from: value) { return date }
-        return ISO8601DateFormatter().date(from: value)
+        ISO8601DateCoding.date(from: value)
     }
 }

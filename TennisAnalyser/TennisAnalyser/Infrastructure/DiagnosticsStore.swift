@@ -24,15 +24,17 @@ final class DiagnosticsStore {
 
     private let fileManager = FileManager.default
 
+    // 出来事の前後関係はミリ秒で効く（中断から復帰までが数百ミリ秒のことがある）。
+    // `.iso8601` は小数秒を捨てるため、記録が全て `.000` になっていた（F-I9-9）
     private lazy var encoder: JSONEncoder = {
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = ISO8601DateCoding.encodingStrategy
         return encoder
     }()
 
     private lazy var decoder: JSONDecoder = {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = ISO8601DateCoding.decodingStrategy
         return decoder
     }()
 
