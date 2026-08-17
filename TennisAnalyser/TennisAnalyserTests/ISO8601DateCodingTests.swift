@@ -13,6 +13,13 @@ struct ISO8601DateCodingTests {
     /// 小数秒を持つ時刻（.250 秒）
     private let date = Date(timeIntervalSince1970: 1_780_000_000.25)
 
+    /// 上と同じ時刻を秒精度で表したもの（＝改修前の形式で書かれた既存ファイル）
+    ///
+    /// 1_780_000_000 は 2026-05-28T20:26:40Z。リテラルを手で書くと取り違えるため、
+    /// 秒数との対応をここに固定しておく。
+    private let secondsOnlyText = "2026-05-28T20:26:40Z"
+    private let secondsOnlyEpoch: TimeInterval = 1_780_000_000
+
     @Test("書き出した文字列を読み戻すとミリ秒まで一致する")
     func roundTripKeepsSubSecond() {
         let text = ISO8601DateCoding.string(from: date)
@@ -24,9 +31,9 @@ struct ISO8601DateCodingTests {
 
     @Test("小数秒の無い既存の文字列も読める")
     func acceptsSecondsOnlyText() {
-        let parsed = try! #require(ISO8601DateCoding.date(from: "2026-06-08T09:46:40Z"))
+        let parsed = try! #require(ISO8601DateCoding.date(from: secondsOnlyText))
 
-        #expect(abs(parsed.timeIntervalSince1970 - 1_780_000_000) < 0.001)
+        #expect(abs(parsed.timeIntervalSince1970 - secondsOnlyEpoch) < 0.001)
     }
 
     @Test("ISO8601 として解釈できない文字列は nil を返す")
@@ -63,10 +70,10 @@ struct ISO8601DateCodingTests {
 
     @Test("秒精度で書かれた既存の manifest も復号できる")
     func jsonDecodesLegacySecondsOnly() throws {
-        let json = Data(#"{"at":"2026-06-08T09:46:40Z"}"#.utf8)
+        let json = Data(#"{"at":"\#(secondsOnlyText)"}"#.utf8)
         let decoded = try decoder().decode(Box.self, from: json)
 
-        #expect(abs(decoded.at.timeIntervalSince1970 - 1_780_000_000) < 0.001)
+        #expect(abs(decoded.at.timeIntervalSince1970 - secondsOnlyEpoch) < 0.001)
     }
 
     @Test("復号できない値は DecodingError になる")
