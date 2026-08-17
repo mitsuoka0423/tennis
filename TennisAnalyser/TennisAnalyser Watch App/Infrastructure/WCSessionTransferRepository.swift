@@ -71,7 +71,8 @@ final class WCSessionTransferRepository: NSObject, SwingTransferRepository {
             "swingId": swing.id,
             "sessionId": swing.sessionId,
             "sequence": swing.sequence,
-            "detectedAt": ISO8601DateFormatter().string(from: swing.detectedAt),
+            // 小数秒つき（F-I9-9）。CSV ヘッダーの DetectedAt と同じ形式に揃える
+            "detectedAt": SwingRepositoryImpl.iso8601.string(from: swing.detectedAt),
             "peakAcceleration": swing.peakAcceleration,
         ]
         session.transferFile(fileURL, metadata: metadata)

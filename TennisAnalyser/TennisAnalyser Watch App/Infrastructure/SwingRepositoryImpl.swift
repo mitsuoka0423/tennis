@@ -18,6 +18,13 @@ final class SwingRepositoryImpl: SwingRepository {
     private static let directoryName = "swings"
     private static let csvHeader = "Timestamp(ms),AccX,AccY,AccZ,GyroX,GyroY,GyroZ,ShotClass"
 
+    /// 小数秒つき ISO8601（連続記録のチャンクヘッダーと同じ形式）
+    nonisolated(unsafe) static let iso8601: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
     // MARK: - Private
 
     private let fileManager = FileManager.default
@@ -85,7 +92,10 @@ final class SwingRepositoryImpl: SwingRepository {
         lines.append("# SwingID: \(swing.id)")
         lines.append("# SessionID: \(swing.sessionId)")
         lines.append("# Sequence: \(swing.sequence)")
-        lines.append("# DetectedAt: \(ISO8601DateFormatter().string(from: swing.detectedAt))")
+        // 小数秒つき: 既定の ISO8601DateFormatter は秒で切り捨てる。
+        // detectedAt はクリップの切り出し位置を決めるため、秒に丸めると
+        // 前後2秒窓の中で最大1秒ずれる（F-I9-9）
+        lines.append("# DetectedAt: \(Self.iso8601.string(from: swing.detectedAt))")
         lines.append("# ImpactTimestampMs: \(swing.impactTimestampMs)")
         lines.append(String(format: "# PeakAcceleration: %.3f", swing.peakAcceleration))
 

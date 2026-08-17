@@ -120,7 +120,7 @@ enum SwingCSVParser {
             id: meta["SwingID"] ?? "\(sessionId)-\(sequence)",
             sessionId: sessionId,
             sequence: sequence,
-            detectedAt: meta["DetectedAt"].flatMap { ISO8601DateFormatter().date(from: $0) },
+            detectedAt: meta["DetectedAt"].flatMap { ISO8601DateCoding.date(from: $0) },
             impactTimestampMs: meta["ImpactTimestampMs"].flatMap(Int64.init),
             peakAcceleration: meta["PeakAcceleration"].flatMap(Double.init),
             shotClass: meta["ShotClass"].flatMap(ShotClass.init(rawValue:)),

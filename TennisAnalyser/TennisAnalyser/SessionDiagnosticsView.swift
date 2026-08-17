@@ -85,23 +85,29 @@ struct SessionDiagnosticsView: View {
 
     @ViewBuilder
     private func detail(for sessionId: String) -> some View {
-        let d = diagnostics.diagnostics(for: sessionId)
+        let events = diagnostics.events(for: sessionId)
+        let d = SessionDiagnostics.make(sessionId: sessionId, from: events)
         let pending = pendingSwings(for: sessionId)
+        // 録画がなぜ止まったかは集計では判別できない。中断理由の文字列
+        // （`captureInterrupted(reason=5)` 等）と、中断に復帰が続いているかは
+        // 出来事の並びにしか現れないため、画面上でも読めるようにする
+        let timeline = DiagnosticsReport.timeline(from: events)
 
         List {
             Section("録画") {
-                row("カバー率", d.coverageRatio.map { $0.formatted(.percent.precision(.fractionLength(1))) } ?? "—")
-                row("録画時間", Self.duration(d.recordedDuration))
-                row("セッション時間", d.sessionDuration.map(Self.duration) ?? "—")
+                row("カバー率", d.coverageRatio.map { DiagnosticsReport.percent($0) } ?? "—")
+                row("録画時間", DiagnosticsReport.duration(d.recordedDuration))
+                row("セッション時間", d.sessionDuration.map { DiagnosticsReport.duration($0) } ?? "—")
                 row("セグメント数", "\(d.segmentCount)")
                 row("中断回数", "\(d.interruptionCount)")
+                row("復帰回数", "\(d.resumptionCount)")
             }
 
             if !d.segmentEndReasonCounts.isEmpty {
                 Section("セグメント終了理由") {
                     ForEach(SegmentEndReason.allCases, id: \.self) { reason in
                         if let count = d.segmentEndReasonCounts[reason] {
-                            row(Self.label(for: reason), "\(count)")
+                            row(DiagnosticsReport.label(for: reason), "\(count)")
                         }
                     }
                 }
@@ -112,7 +118,22 @@ struct SessionDiagnosticsView: View {
                 row("生成できず", "\(d.clipsSkipped)")
                 ForEach(ClipSkipReason.allCases, id: \.self) { reason in
                     if let count = d.skipReasonCounts[reason] {
-                        row(Self.label(for: reason), "\(count)")
+                        row(DiagnosticsReport.label(for: reason), "\(count)")
+                    }
+                }
+            }
+
+            if !timeline.isEmpty {
+                Section {
+                    ForEach(timeline.indices, id: \.self) { index in
+                        Text(timeline[index])
+                            .font(.caption.monospaced())
+                    }
+                } header: {
+                    Text("出来事")
+                } footer: {
+                    if d.interruptionCount > d.resumptionCount {
+                        Text("復帰しなかった中断が \(d.interruptionCount - d.resumptionCount) 件あります。以降の録画は止まったままです。")
                     }
                 }
             }
@@ -136,9 +157,11 @@ struct SessionDiagnosticsView: View {
             }
 
             Section {
-                ShareLink(item: shareText(sessionId: sessionId, diagnostics: d)) {
+                ShareLink(item: DiagnosticsReport.text(sessionId: sessionId, events: events)) {
                     Label("診断内容を共有", systemImage: "square.and.arrow.up")
                 }
+            } footer: {
+                Text("集計に加えて、中断理由と出来事の並びを含みます。")
             }
         }
         .navigationTitle("診断")
@@ -173,21 +196,6 @@ struct SessionDiagnosticsView: View {
         }
     }
 
-    // MARK: - 共有
-
-    private func shareText(sessionId: String, diagnostics d: SessionDiagnostics) -> String {
-        """
-        TennisAnalyser セッション診断
-        SessionID: \(sessionId)
-        開始: \(d.sessionStartedAt.map(Self.dateFormatter.string(from:)) ?? "—")
-        録画時間: \(Self.duration(d.recordedDuration)) / セッション時間: \(d.sessionDuration.map(Self.duration) ?? "—")
-        カバー率: \(d.coverageRatio.map { $0.formatted(.percent.precision(.fractionLength(1))) } ?? "—")
-        セグメント数: \(d.segmentCount) / 中断回数: \(d.interruptionCount)
-        クリップ: 成功 \(d.clipsExtracted) / 失敗 \(d.clipsSkipped)
-        失敗理由: \(d.skipReasonCounts.map { "\(Self.label(for: $0.key))=\($0.value)" }.joined(separator: ", "))
-        """
-    }
-
     // MARK: - 表示用
 
     private static let dateFormatter: DateFormatter = {
@@ -196,28 +204,4 @@ struct SessionDiagnosticsView: View {
         f.timeStyle = .short
         return f
     }()
-
-    private static func duration(_ seconds: TimeInterval) -> String {
-        let total = Int(seconds.rounded())
-        return String(format: "%d分%02d秒", total / 60, total % 60)
-    }
-
-    private static func label(for reason: SegmentEndReason) -> String {
-        switch reason {
-        case .sessionEnded: return "セッション終了"
-        case .interrupted: return "中断"
-        case .maxDuration: return "最大長に到達"
-        case .error: return "エラー"
-        }
-    }
-
-    private static func label(for reason: ClipSkipReason) -> String {
-        switch reason {
-        case .detectedAtMissing: return "検知時刻が不明"
-        case .noSourceRecording: return "録画が存在しない"
-        case .sourceFileMissing: return "動画ファイルが見つからない"
-        case .outOfRecordedRange: return "録画されていない時間帯"
-        case .extractionFailed: return "切り出しに失敗"
-        }
-    }
 }

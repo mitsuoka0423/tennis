@@ -85,8 +85,13 @@ struct SessionDiagnostics: Equatable {
     let sessionDuration: TimeInterval?
 
     let interruptionCount: Int
+    /// 中断からの復帰回数。`interruptionCount` を下回る差が「復帰しなかった中断」であり、
+    /// 録画がセッションの残り全部を取りこぼしたことを意味する（F-I9-1 の判定材料）
+    let resumptionCount: Int
 
+    /// クリップを生成できたスイングの数（**試行回数ではなくスイングの数**）
     let clipsExtracted: Int
+    /// クリップが未生成のスイングの数（同上）
     let clipsSkipped: Int
     let skipReasonCounts: [ClipSkipReason: Int]
     let segmentEndReasonCounts: [SegmentEndReason: Int]
@@ -109,9 +114,13 @@ struct SessionDiagnostics: Equatable {
         var startedSegmentIndices: Set<Int> = []
         var recordedDuration: TimeInterval = 0
         var interruptionCount = 0
-        var clipsExtracted = 0
-        var clipsSkipped = 0
-        var skipReasonCounts: [ClipSkipReason: Int] = [:]
+        var resumptionCount = 0
+        // クリップは1スイングにつき何度でも試行されるため、出来事を数えると
+        // 試行回数になってしまう。スイングごとに最後の判定だけを残す。
+        // 2026-08-09 は再生成後に「成功227 / 失敗329」と出たが、
+        // 実際に未生成なのは10件だった（失敗の大半は再試行で成功済みの過去の試行）。
+        var extractedSequences: Set<Int> = []
+        var latestSkipBySequence: [Int: ClipSkipReason] = [:]
         var segmentEndReasonCounts: [SegmentEndReason: Int] = [:]
 
         for event in events {
@@ -133,13 +142,19 @@ struct SessionDiagnostics: Equatable {
             case .interrupted:
                 interruptionCount += 1
             case .interruptionEnded:
-                break
-            case .clipExtracted:
-                clipsExtracted += 1
-            case .clipSkipped(_, _, let reason):
-                clipsSkipped += 1
-                skipReasonCounts[reason, default: 0] += 1
+                resumptionCount += 1
+            case .clipExtracted(let sequence, _):
+                extractedSequences.insert(sequence)
+                latestSkipBySequence.removeValue(forKey: sequence)
+            case .clipSkipped(let sequence, _, let reason):
+                extractedSequences.remove(sequence)
+                latestSkipBySequence[sequence] = reason
             }
+        }
+
+        var skipReasonCounts: [ClipSkipReason: Int] = [:]
+        for reason in latestSkipBySequence.values {
+            skipReasonCounts[reason, default: 0] += 1
         }
 
         let sessionDuration = sessionStartedAt.flatMap { start in
@@ -154,8 +169,9 @@ struct SessionDiagnostics: Equatable {
             recordedDuration: recordedDuration,
             sessionDuration: sessionDuration,
             interruptionCount: interruptionCount,
-            clipsExtracted: clipsExtracted,
-            clipsSkipped: clipsSkipped,
+            resumptionCount: resumptionCount,
+            clipsExtracted: extractedSequences.count,
+            clipsSkipped: latestSkipBySequence.count,
             skipReasonCounts: skipReasonCounts,
             segmentEndReasonCounts: segmentEndReasonCounts
         )
