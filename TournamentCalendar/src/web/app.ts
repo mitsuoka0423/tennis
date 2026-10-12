@@ -97,7 +97,8 @@ input[type=date] { font:inherit; font-size:14px; color:var(--fg); background:var
 .actions { margin-top:4px; display:flex; align-items:center; gap:16px; }
 .actions a { color:var(--muted); font-size:14px; }
 button { font:inherit; padding:8px 20px; border-radius:8px; border:0; background:var(--accent); color:#14261b; font-weight:600; cursor:pointer; }
-.count { color:var(--muted); font-size:13px; margin:0 0 16px; }
+/* 件数は見出しの横に置く。一覧の上に置くとカードの上端がサイドバーの上端より下がり、左右がそろわない */
+.count { color:var(--muted); font-size:13px; font-weight:normal; margin-left:8px; }
 .runs { color:var(--muted); font-size:12px; margin-top:24px; }
 ul { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:12px; }
 .item { background:var(--surface); border-radius:12px; padding:16px 18px; }
@@ -120,7 +121,7 @@ form.addEventListener("change", async () => {
   pending = controller;
   try {
     const doc = new DOMParser().parseFromString(await (await fetch(url, { signal: controller.signal })).text(), "text/html");
-    document.getElementById("results").replaceWith(doc.getElementById("results"));
+    for (const id of ["results", "count"]) document.getElementById(id).replaceWith(doc.getElementById(id));
     history.replaceState(null, "", url);
   } catch (e) {
     if (e.name !== "AbortError") form.submit();
@@ -142,7 +143,7 @@ export const createApp = (db: Db, today: () => string) => {
 </head><body>
 <input type="checkbox" id="filter-toggle" class="toggle" aria-hidden="true">
 <header class="header"><div class="header-inner">
-<h1>草トー一覧</h1>
+<h1>草トー一覧 <span id="count" class="count">${list.length} 件</span></h1>
 <label for="filter-toggle" class="open-filter">絞り込み</label>
 </div></header>
 <div class="layout">
@@ -154,7 +155,6 @@ ${filterForm(filter)}
 <label for="filter-toggle" class="backdrop"></label>
 <main>
 <div id="results">
-<p class="count">${list.length} 件</p>
 <ul>${list.map((t) => row(t, holidays))}</ul>
 </div>
 <p class="runs">${runs.map(
