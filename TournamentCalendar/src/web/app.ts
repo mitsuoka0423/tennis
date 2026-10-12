@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import { html, raw } from "hono/html";
 import type { Db } from "../db.ts";
-import { applyFilter, DAY_KINDS, parseFilter, type Filter } from "../filter.ts";
-import { EVENTS, LEVELS, SITE_IDS, type Status, type Tournament } from "../types.ts";
+import { applyFilter, DAY_KINDS, FILTER_EVENTS, parseFilter, type Filter } from "../filter.ts";
+import { LEVELS, SITE_IDS, type Status, type Tournament } from "../types.ts";
 
 export const SITE_NAMES = {
   clover: "クローバーカップ",
@@ -40,7 +40,7 @@ const filterForm = (f: Filter) => html`
       <input type="date" name="from" value="${f.from}"> 〜 <input type="date" name="to" value="${f.to}">
     </fieldset>
     <fieldset><legend>曜日</legend>${checkboxes("day", DAY_KINDS, f.days)}</fieldset>
-    <fieldset><legend>種目</legend>${checkboxes("event", EVENTS, f.events)}</fieldset>
+    <fieldset><legend>種目</legend>${checkboxes("event", FILTER_EVENTS, f.events)}</fieldset>
     ${SITE_IDS.map(
       (site) => html`<fieldset><legend>レベル（${SITE_NAMES[site]}）</legend>${checkboxes(`level.${site}`, LEVELS, f.levels[site])}</fieldset>`,
     )}

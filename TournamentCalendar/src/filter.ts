@@ -1,5 +1,5 @@
 import { isDayOff } from "./holidays.ts";
-import { EVENTS, LEVELS, SITE_IDS, type Event, type Level, type SiteId, type Tournament } from "./types.ts";
+import { LEVELS, SITE_IDS, type Event, type Level, type SiteId, type Tournament } from "./types.ts";
 
 export const DAY_KINDS = ["休日", "平日"] as const;
 export type DayKind = (typeof DAY_KINDS)[number];
@@ -20,6 +20,9 @@ export const DEFAULT_LEVELS: Record<SiteId, Level[]> = {
   leone: ["中級", "中上級"],
   inspirits: ["中級", "中上級"],
 };
+
+/** 絞り込みに出す種目。女子の種目と団体戦は出ないので選択肢から外す（2026-10-12 ユーザー判断） */
+export const FILTER_EVENTS = ["男子シングルス", "男子ダブルス", "ミックスダブルス", "その他"] as const satisfies readonly Event[];
 
 const DEFAULT_RANGE_DAYS = 60;
 
@@ -56,7 +59,7 @@ export const parseFilter = (params: URLSearchParams, today: string): Filter => {
     from: date("from", base.from),
     to: date("to", base.to),
     days: pick(params.getAll("day"), DAY_KINDS),
-    events: pick(params.getAll("event"), EVENTS),
+    events: pick(params.getAll("event"), FILTER_EVENTS),
     levels: Object.fromEntries(
       SITE_IDS.map((site) => [site, pick(params.getAll(`level.${site}`), LEVELS)]),
     ) as Record<SiteId, Level[]>,

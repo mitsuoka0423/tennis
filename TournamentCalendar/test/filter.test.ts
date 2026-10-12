@@ -42,6 +42,11 @@ describe("parseFilter", () => {
     expect(f.hideFull).toBe(false);
   });
 
+  it("絞り込みに出していない種目を捨てること", () => {
+    const f = parseFilter(new URLSearchParams("q=1&event=女子シングルス&event=団体戦&event=男子シングルス"), TODAY);
+    expect(f.events).toEqual(["男子シングルス"]);
+  });
+
   it("想定外の値を捨てること", () => {
     const f = parseFilter(new URLSearchParams("q=1&from=abc&event=テニス&event=男子ダブルス"), TODAY);
     expect(f.from).toBe(TODAY);
