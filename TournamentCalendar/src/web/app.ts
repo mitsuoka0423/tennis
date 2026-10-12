@@ -75,7 +75,13 @@ body { margin:0; font:15px/1.7 -apple-system, "Hiragino Sans", sans-serif; color
 .layout { display:grid; grid-template-columns:260px minmax(0,1fr); gap:32px; max-width:1080px; margin:0 auto; padding:24px; }
 .sidebar { position:sticky; top:80px; align-self:start; max-height:calc(100vh - 104px); overflow-y:auto;
   background:var(--surface); border-radius:12px; padding:20px; }
-.sidebar h2 { font-size:15px; margin:0 0 8px; }
+.sidebar h2 { font-size:15px; margin:0; }
+.sidebar-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; }
+.history { display:flex; gap:6px; }
+.history button { font-size:12px; font-weight:normal; padding:2px 10px; border-radius:6px; background:var(--surface-2);
+  color:var(--fg); border:1px solid var(--line); }
+.history button:disabled { opacity:.4; cursor:default; }
+html:not(.js) .history { display:none; }
 .toggle, .open-filter, .close-filter, .backdrop { display:none; }
 /* 狭い画面では左右に並べる幅が無い。サイドバーを画面外に置き、ボタンで横から引き出す */
 @media (max-width:767px) {
@@ -118,29 +124,77 @@ ul { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; 
 const LIVE_FILTER = `
 document.documentElement.classList.add("js");
 const form = document.querySelector("form.filter");
+const undoButton = document.getElementById("undo");
+const redoButton = document.getElementById("redo");
 let pending;
+
+// 元に戻す・やり直しはブラウザの履歴に載せる: 戻るボタンや iPhone のスワイプでも同じ操作になるため
+let index = history.state?.i ?? 0;
+let last = Number(sessionStorage.getItem("filter-last") ?? index);
+// 履歴の無い新しい読み込み（初回・「既定に戻す」）では、前の操作の続きにしない
+if (history.state?.i === undefined) {
+  history.replaceState({ i: 0 }, "", location.href);
+  last = 0;
+  sessionStorage.setItem("filter-last", "0");
+}
+const updateButtons = () => {
+  undoButton.disabled = index <= 0;
+  redoButton.disabled = index >= last;
+};
+updateButtons();
+
+const load = async (url, { restoreForm }) => {
+  const controller = new AbortController();
+  pending?.abort();
+  pending = controller;
+  const doc = new DOMParser().parseFromString(await (await fetch(url, { signal: controller.signal })).text(), "text/html");
+  document.getElementById("results").replaceWith(doc.getElementById("results"));
+  if (restoreForm) form.innerHTML = doc.querySelector("form.filter").innerHTML;
+};
+
+form.addEventListener("change", async () => {
+  const url = "?" + new URLSearchParams(new FormData(form));
+  index += 1;
+  last = index;
+  sessionStorage.setItem("filter-last", String(last));
+  history.pushState({ i: index }, "", url);
+  updateButtons();
+  try {
+    await load(url, { restoreForm: false });
+  } catch (e) {
+    if (e.name !== "AbortError") form.submit();
+  }
+});
+
+window.addEventListener("popstate", async (e) => {
+  index = e.state?.i ?? 0;
+  updateButtons();
+  try {
+    await load(location.href, { restoreForm: true });
+  } catch (err) {
+    if (err.name !== "AbortError") location.reload();
+  }
+});
+
+undoButton.addEventListener("click", () => history.back());
+redoButton.addEventListener("click", () => history.forward());
+document.addEventListener("keydown", (e) => {
+  if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
+  // 日付の入力中は入力欄そのものの取り消しを優先する
+  if (e.target instanceof HTMLInputElement && e.target.type === "date") return;
+  e.preventDefault();
+  if (e.shiftKey ? !redoButton.disabled : !undoButton.disabled) e.shiftKey ? history.forward() : history.back();
+});
+
 // 1サイトだけを見るとき、ほかのサイトのレベルを1つずつ外す手間を省く
 form.addEventListener("click", (e) => {
   const site = e.target.dataset?.only;
   if (!site) return;
-  const own = [...form.querySelectorAll(\`input[name="level.\${site}"]\`)];
+  const own = [...form.querySelectorAll('input[name="level.' + site + '"]')];
   for (const input of form.querySelectorAll('input[name^="level."]')) if (!own.includes(input)) input.checked = false;
   // 自サイトも全部外れていると何も出ないため、既定のレベルを入れる
   if (!own.some((i) => i.checked)) for (const i of own) i.checked = e.target.dataset.defaults.split(",").includes(i.value);
   form.dispatchEvent(new Event("change"));
-});
-form.addEventListener("change", async () => {
-  const url = "?" + new URLSearchParams(new FormData(form));
-  const controller = new AbortController();
-  pending?.abort();
-  pending = controller;
-  try {
-    const doc = new DOMParser().parseFromString(await (await fetch(url, { signal: controller.signal })).text(), "text/html");
-    document.getElementById("results").replaceWith(doc.getElementById("results"));
-    history.replaceState(null, "", url);
-  } catch (e) {
-    if (e.name !== "AbortError") form.submit();
-  }
 });
 `;
 
@@ -164,7 +218,8 @@ export const createApp = (db: Db, today: () => string) => {
 <div class="layout">
 <aside class="sidebar">
 <label for="filter-toggle" class="close-filter" aria-label="閉じる">✕</label>
-<h2>絞り込み</h2>
+<div class="sidebar-head"><h2>絞り込み</h2>
+<span class="history"><button type="button" id="undo" title="元に戻す（⌘Z）">↶ 元に戻す</button><button type="button" id="redo" title="やり直す（⇧⌘Z）">やり直す ↷</button></span></div>
 ${filterForm(filter)}
 </aside>
 <label for="filter-toggle" class="backdrop"></label>
