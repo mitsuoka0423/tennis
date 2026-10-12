@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { html, raw } from "hono/html";
 import type { Db } from "../db.ts";
-import { applyFilter, DAY_KINDS, FILTER_EVENTS, parseFilter, type Filter } from "../filter.ts";
+import { applyFilter, DAY_KINDS, DEFAULT_LEVELS, FILTER_EVENTS, parseFilter, type Filter } from "../filter.ts";
 import { LEVELS, SITE_IDS, type Status, type Tournament } from "../types.ts";
 
 export const SITE_NAMES = {
@@ -42,7 +42,7 @@ const filterForm = (f: Filter) => html`
     <fieldset><legend>曜日</legend>${checkboxes("day", DAY_KINDS, f.days)}</fieldset>
     <fieldset><legend>種目</legend>${checkboxes("event", FILTER_EVENTS, f.events)}</fieldset>
     ${SITE_IDS.map(
-      (site) => html`<fieldset><legend>レベル（${SITE_NAMES[site]}）</legend>${checkboxes(`level.${site}`, LEVELS, f.levels[site])}</fieldset>`,
+      (site) => html`<fieldset><legend>レベル（${SITE_NAMES[site]}）<button type="button" class="only" data-only="${site}" data-defaults="${DEFAULT_LEVELS[site].join(",")}">これだけ</button></legend>${checkboxes(`level.${site}`, LEVELS, f.levels[site])}</fieldset>`,
     )}
     <fieldset><legend>状態</legend>
       <label class="chip"><input type="checkbox" name="hideFull" value="1" ${f.hideFull ? "checked" : ""}>満員・中止を隠す</label>
@@ -92,6 +92,10 @@ body { margin:0; font:15px/1.7 -apple-system, "Hiragino Sans", sans-serif; color
 h1 { font-size:18px; margin:0; }
 fieldset { border:0; padding:0; margin:0 0 16px; }
 legend { font-size:12px; color:var(--muted); padding:0; margin-bottom:6px; }
+button.only { font-size:11px; font-weight:normal; padding:1px 8px; margin-left:8px; border-radius:999px;
+  background:var(--surface-2); color:var(--muted); border:1px solid var(--line); }
+/* 「これだけ」は JS で動く。JS 無効では押しても何も起きないため、JS が動いたときだけ出す */
+html:not(.js) button.only { display:none; }
 .chip { display:inline-flex; align-items:center; gap:6px; margin:0 14px 6px 0; white-space:nowrap; }
 input[type=checkbox] { accent-color:var(--accent); width:16px; height:16px; }
 input[type=date] { font:inherit; font-size:14px; color:var(--fg); background:var(--surface-2); border:1px solid var(--line);
@@ -112,8 +116,19 @@ ul { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; 
 
 // ページ全体を送信し直すと、iPhone で引き出した絞り込みが閉じてしまう。一覧部分だけを取り直して差し替える
 const LIVE_FILTER = `
+document.documentElement.classList.add("js");
 const form = document.querySelector("form.filter");
 let pending;
+// 1サイトだけを見るとき、ほかのサイトのレベルを1つずつ外す手間を省く
+form.addEventListener("click", (e) => {
+  const site = e.target.dataset?.only;
+  if (!site) return;
+  const own = [...form.querySelectorAll(\`input[name="level.\${site}"]\`)];
+  for (const input of form.querySelectorAll('input[name^="level."]')) if (!own.includes(input)) input.checked = false;
+  // 自サイトも全部外れていると何も出ないため、既定のレベルを入れる
+  if (!own.some((i) => i.checked)) for (const i of own) i.checked = e.target.dataset.defaults.split(",").includes(i.value);
+  form.dispatchEvent(new Event("change"));
+});
 form.addEventListener("change", async () => {
   const url = "?" + new URLSearchParams(new FormData(form));
   const controller = new AbortController();
