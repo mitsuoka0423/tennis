@@ -32,5 +32,7 @@ export type Tournament = {
   level: Level;
   levelRaw: string;
   status: Status;
+  /** サイト上のサーフェスの表記。取れないサイトは null */
+  surface: string | null;
   url: string;
 };

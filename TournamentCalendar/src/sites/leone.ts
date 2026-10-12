@@ -6,7 +6,20 @@ import { hhmm, isoDate, squash } from "../normalize/text.ts";
 
 export const LEONE_URL = "https://leone-tokyo2022.com/mens-singles/";
 
-export const parseLeone = (html: string): Tournament[] => {
+export type LeoneTournament = Tournament & { venueUrl: string | null };
+
+/** 会場ページの「サーフェース」欄。面数は大会と関係ないので落とす */
+export const parseLeoneVenueSurface = (html: string): string | null => {
+  const $ = cheerio.load(html);
+  const cell = $("td")
+    .filter((_, td) => $(td).text().trim() === "サーフェース")
+    .first()
+    .next("td");
+  const text = squash(cell.text()).replace(/\s*\d+\s*面.*$/, "");
+  return text || null;
+};
+
+export const parseLeone = (html: string): LeoneTournament[] => {
   const $ = cheerio.load(html);
   return $("table.tablepress tbody tr")
     .toArray()
@@ -35,8 +48,11 @@ export const parseLeone = (html: string): Tournament[] => {
           levelRaw,
           // 一覧ページに空き状況が無い。詳細ページは別ドメインの SPA で、取得コストに見合わないため見送る
           status: "不明",
+          // 一覧には会場名しか無い。会場ページから後で埋める
+          surface: null,
           url,
-        } satisfies Tournament,
+          venueUrl: cells.eq(3).find("a").attr("href") ?? null,
+        } satisfies LeoneTournament,
       ];
     });
 };

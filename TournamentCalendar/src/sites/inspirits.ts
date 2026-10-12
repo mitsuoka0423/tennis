@@ -6,6 +6,13 @@ import { hhmm, isoDate, squash } from "../normalize/text.ts";
 
 export const INSPIRITS_ORIGIN = "https://reserve.inspirits-tennis-club.com";
 
+const SURFACE = /(\S*(?:人工芝|ハード|クレー|オムニ|カーペット)\S*?コート)(\((?:アウトドア|インドア)\))?/;
+
+export const parseSurface = (text: string): string | null => {
+  const m = text.match(SURFACE);
+  return m ? `${m[1]}${m[2] ?? ""}` : null;
+};
+
 const toStatus = (statusClass: string): Status => {
   if (statusClass.includes("stock_many")) return "受付中";
   if (statusClass.includes("stock_few")) return "空き少";
@@ -43,6 +50,7 @@ export const parseInspirits = (html: string): Tournament[] => {
           level: normalizeLevel(levelRaw),
           levelRaw,
           status: toStatus(row.find(".b-status dd").attr("class") ?? ""),
+          surface: parseSurface(detail),
           url: new URL(btn.attr("data-url") ?? "/reservations/calendar", INSPIRITS_ORIGIN).href,
         } satisfies Tournament,
       ];

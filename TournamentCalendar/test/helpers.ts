@@ -12,6 +12,7 @@ export const tournament = (over: Partial<Tournament> = {}): Tournament => ({
   level: "中級",
   levelRaw: "中級",
   status: "受付中",
+  surface: "オムニコート",
   url: "https://example.com/1",
   ...over,
 });

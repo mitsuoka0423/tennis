@@ -40,6 +40,8 @@ export const parseClover = (html: string): Tournament[] => {
           level: normalizeLevel(levelRaw),
           levelRaw,
           status: toStatus(field("申込み")),
+          // 一覧にも大会ページにもサーフェスが載っていない（2026-10-12 確認）
+          surface: null,
           url: url.replace(/\?.*$/, ""),
         } satisfies Tournament,
       ];

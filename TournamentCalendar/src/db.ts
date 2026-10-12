@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS tournaments (
   level TEXT NOT NULL,
   level_raw TEXT NOT NULL,
   status TEXT NOT NULL,
+  surface TEXT,
   url TEXT NOT NULL,
   first_seen_at TEXT NOT NULL,
   last_seen_at TEXT NOT NULL
@@ -57,6 +58,7 @@ const toTournament = (r: Row): Tournament => ({
   level: r.level as Tournament["level"],
   levelRaw: r.level_raw as string,
   status: r.status as Status,
+  surface: (r.surface as string | null) ?? null,
   url: r.url as string,
 });
 
@@ -66,15 +68,18 @@ export type CrawlRun = { site: string; ok: boolean; count: number; error: string
 export const openDb = (path: string) => {
   const db = new DatabaseSync(path);
   db.exec(SCHEMA);
+  // surface は導入後に足した列。既存の DB には CREATE TABLE IF NOT EXISTS では入らない
+  const columns = db.prepare("PRAGMA table_info(tournaments)").all().map((c) => c.name);
+  if (!columns.includes("surface")) db.exec("ALTER TABLE tournaments ADD COLUMN surface TEXT");
 
   const selectStatus = db.prepare("SELECT status FROM tournaments WHERE id = ?");
   const upsert = db.prepare(`
-    INSERT INTO tournaments (id, site, name, date, start_time, venue, event, level, level_raw, status, url, first_seen_at, last_seen_at)
-    VALUES (:id, :site, :name, :date, :startTime, :venue, :event, :level, :levelRaw, :status, :url, :now, :now)
+    INSERT INTO tournaments (id, site, name, date, start_time, venue, event, level, level_raw, status, surface, url, first_seen_at, last_seen_at)
+    VALUES (:id, :site, :name, :date, :startTime, :venue, :event, :level, :levelRaw, :status, :surface, :url, :now, :now)
     ON CONFLICT (id) DO UPDATE SET
       name = excluded.name, date = excluded.date, start_time = excluded.start_time, venue = excluded.venue,
       event = excluded.event, level = excluded.level, level_raw = excluded.level_raw,
-      status = excluded.status, url = excluded.url, last_seen_at = excluded.last_seen_at`);
+      status = excluded.status, surface = excluded.surface, url = excluded.url, last_seen_at = excluded.last_seen_at`);
   const insertHistory = db.prepare(
     "INSERT INTO status_history (tournament_id, from_status, to_status, changed_at) VALUES (?, ?, ?, ?)",
   );

@@ -1,6 +1,6 @@
 import type { SiteId, Tournament } from "./types.ts";
 import { CLOVER_URL, parseClover } from "./sites/clover.ts";
-import { LEONE_URL, parseLeone } from "./sites/leone.ts";
+import { LEONE_URL, parseLeone, parseLeoneVenueSurface } from "./sites/leone.ts";
 import { INSPIRITS_ORIGIN, lastPage, parseInspirits } from "./sites/inspirits.ts";
 
 const USER_AGENT = "TournamentCalendar/0.1 (personal use; once a day)";
@@ -21,7 +21,21 @@ const getText = async (url: string, init?: RequestInit): Promise<Response> => {
 
 const fetchClover = async () => parseClover(await (await getText(CLOVER_URL)).text());
 
-const fetchLeone = async () => parseLeone(await (await getText(LEONE_URL)).text());
+const fetchLeone = async (): Promise<Tournament[]> => {
+  const list = parseLeone(await (await getText(LEONE_URL)).text());
+  // 会場は数か所（2026-10-12 時点で3か所）。大会ごとではなく会場ごとに1回だけ取る
+  const surfaces = new Map<string, string | null>();
+  for (const url of new Set(list.flatMap((t) => (t.venueUrl ? [t.venueUrl] : [])))) {
+    if (surfaces.size > 0) await sleep(PAGE_INTERVAL_MS);
+    try {
+      surfaces.set(url, parseLeoneVenueSurface(await (await getText(url)).text()));
+    } catch {
+      // サーフェスは補足情報。会場ページが取れなくても大会一覧は使える
+      surfaces.set(url, null);
+    }
+  }
+  return list.map(({ venueUrl, ...t }) => ({ ...t, surface: venueUrl ? (surfaces.get(venueUrl) ?? null) : null }));
+};
 
 const fetchInspirits = async (today: Date) => {
   const listPath = "/reservations/calendar?label_id=&tag_id%5B2%5D%5B4%5D=4";

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseClover } from "../src/sites/clover.ts";
-import { parseLeone } from "../src/sites/leone.ts";
-import { lastPage, parseInspirits } from "../src/sites/inspirits.ts";
+import { parseLeone, parseLeoneVenueSurface } from "../src/sites/leone.ts";
+import { lastPage, parseInspirits, parseSurface } from "../src/sites/inspirits.ts";
 import { fixture } from "./fixture.ts";
 
 describe("parseClover", () => {
@@ -23,6 +23,7 @@ describe("parseClover", () => {
       level: "中級",
       levelRaw: "中級以下",
       status: "受付中",
+      surface: null,
       url: "https://tennis-net.jp/clover/c56411",
     });
   });
@@ -55,7 +56,9 @@ describe("parseLeone", () => {
       level: "中上級",
       levelRaw: "中上級",
       status: "不明",
+      surface: null,
       url: "https://leone.tokyo/frontend/tournament-public.html?tId=3110",
+      venueUrl: "https://leone-tokyo2022.com/ivy/",
     });
   });
 
@@ -89,6 +92,7 @@ describe("parseInspirits", () => {
       level: "中上級",
       levelRaw: "中上級",
       status: "受付中",
+      surface: null,
       url: "https://reserve.inspirits-tennis-club.com/reservations/add?event_id=29177&usage_timestamp_from=2026%2F10%2F17+08%3A00",
     });
   });
@@ -100,5 +104,33 @@ describe("parseInspirits", () => {
 
   it("ページ送りから最終ページ番号を読むこと", () => {
     expect(lastPage(html)).toBe(6);
+  });
+});
+
+describe("parseLeoneVenueSurface", () => {
+  it("会場ページのサーフェース欄から面数を除いて取り出すこと", () => {
+    expect(parseLeoneVenueSurface(fixture("leone-venue.html"))).toBe("インドアオムニコート");
+  });
+
+  it("サーフェース欄が無ければ null を返すこと", () => {
+    expect(parseLeoneVenueSurface("<table><tr><td>住所</td><td>東京都</td></tr></table>")).toBeNull();
+  });
+});
+
+describe("parseSurface", () => {
+  it.each([
+    ["男子シングルス オープン ハードコート(Sフィールド 5～10番) ※主催リーグ", "ハードコート"],
+    ["男子シングルス 初級 砂入り人工芝コート(アウトドア)", "砂入り人工芝コート(アウトドア)"],
+    ["男子シングルス 初中級 砂無し人工芝コート(インドア)", "砂無し人工芝コート(インドア)"],
+    ["男子シングルス 中上級", null],
+  ])("%s から %s を取り出すこと", (input, expected) => {
+    expect(parseSurface(input)).toBe(expected);
+  });
+});
+
+describe("parseInspirits のサーフェス", () => {
+  it("説明にサーフェスがある大会だけ埋めること", () => {
+    const list = parseInspirits(fixture("inspirits-page2.html"));
+    expect(list.find((t) => t.venue === "大宮運動場")?.surface).toBe("ハードコート");
   });
 });

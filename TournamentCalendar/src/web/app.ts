@@ -56,6 +56,7 @@ const row = (t: Tournament, holidays: ReadonlySet<string>) => html`
     <div class="meta">
       <span class="status ${STATUS_CLASS[t.status]}">${t.status}</span>
       <span>${t.venue}</span>
+      ${t.surface ? html`<span>${t.surface}</span>` : ""}
       <span>${t.event}</span>
       <span>${t.level}${t.levelRaw && t.levelRaw !== t.level ? `（${t.levelRaw}）` : ""}</span>
       <span class="site">${SITE_NAMES[t.site]}</span>
