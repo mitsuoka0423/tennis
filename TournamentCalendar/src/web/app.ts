@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { html, raw } from "hono/html";
 import type { Db } from "../db.ts";
+import { toPins, type Pin } from "../map.ts";
 import { applyFilter, DAY_KINDS, DEFAULT_LEVELS, FILTER_EVENTS, parseFilter, type Filter } from "../filter.ts";
 import { LEVELS, SITE_IDS, type Status, type Tournament } from "../types.ts";
 
@@ -41,7 +42,7 @@ const checkboxes = (name: string, values: readonly string[], selected: readonly 
   );
 
 const filterForm = (f: Filter) => html`
-  <form method="get" class="filter">
+  <form method="get" class="filter" id="filter">
     <input type="hidden" name="q" value="1">
     <fieldset><legend>期間</legend>
       <input type="date" name="from" value="${f.from}"> 〜 <input type="date" name="to" value="${f.to}">
@@ -56,6 +57,46 @@ const filterForm = (f: Filter) => html`
     </fieldset>
     <div class="actions"><noscript><button type="submit">絞り込む</button></noscript> <a href="/">既定に戻す</a></div>
   </form>`;
+
+export const VIEWS = ["list", "map"] as const;
+export type View = (typeof VIEWS)[number];
+
+// 表示の切り替えはヘッダーに置くが、絞り込みと同じ URL に載せたい。form 属性でフォームの一員にする
+const viewSwitch = (view: View) => html`
+  <div class="view-switch" id="view-switch">
+    ${VIEWS.map(
+      (v) =>
+        html`<label><input type="radio" name="view" value="${v}" form="filter" ${v === view ? "checked" : ""}>${v === "list" ? "一覧" : "地図"}</label>`,
+    )}
+  </div>`;
+
+const popup = (pin: Pin, holidays: ReadonlySet<string>) => html`
+  <template class="pin" data-lat="${pin.coords.lat}" data-lng="${pin.coords.lng}">
+    <div class="popup">
+      <strong>${pin.venue}</strong>
+      <ul>${pin.tournaments.map(
+        (t) => html`<li>
+          <span>${formatDate(t.date, holidays)} ${t.startTime ?? ""}</span>
+          <a href="${t.url}" target="_blank" rel="noopener">${t.level}・${t.event}</a>
+          <span class="status ${STATUS_CLASS[t.status]}">${t.status}</span>
+        </li>`,
+      )}</ul>
+    </div>
+  </template>`;
+
+const mapView = (list: readonly Tournament[], db: Db, holidays: ReadonlySet<string>) => {
+  const { pins, unlocated } = toPins(list, db.venueCoords());
+  return html`
+    <div id="map"></div>
+    ${pins.map((p) => popup(p, holidays))}
+    ${
+      unlocated.length > 0
+        ? html`<p class="unlocated">地図に出せない大会が ${unlocated.length} 件あります（会場: ${[
+            ...new Set(unlocated.map((t) => t.venue)),
+          ].join("、")}）</p>`
+        : ""
+    }`;
+};
 
 const row = (t: Tournament, holidays: ReadonlySet<string>) => html`
   <li class="item">
@@ -79,6 +120,21 @@ const STYLE = `
 body { margin:0; font:15px/1.7 -apple-system, "Hiragino Sans", sans-serif; color:var(--fg); background:var(--bg); }
 .header { position:sticky; top:0; z-index:1; background:var(--bg); border-bottom:1px solid var(--line); }
 .header-inner { display:flex; align-items:center; justify-content:space-between; max-width:1080px; margin:0 auto; padding:0 24px; height:56px; }
+.view-switch { display:flex; gap:2px; background:var(--surface); border-radius:8px; padding:2px; margin-left:auto; margin-right:12px; }
+.view-switch label { cursor:pointer; }
+.view-switch input { position:absolute; opacity:0; pointer-events:none; }
+.view-switch label:has(input) { padding:4px 14px; border-radius:6px; font-size:14px; color:var(--muted); }
+.view-switch label:has(input:checked) { background:var(--surface-2); color:var(--fg); }
+#map { height:calc(100vh - 56px - 48px); min-height:360px; border-radius:12px; }
+/* 地理院の淡色地図は白地。ダーク画面で地図だけ眩しくならないよう、色を反転して暗くする */
+#map .leaflet-tile-pane { filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9); }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background:var(--surface-2); color:var(--fg); }
+.leaflet-popup-content { font-size:13px; line-height:1.6; }
+.leaflet-container a { color:var(--accent); }
+.leaflet-container { background:var(--surface); font:inherit; }
+.popup ul { gap:4px; }
+.popup li { display:flex; flex-wrap:wrap; gap:0 8px; align-items:center; }
+.unlocated { color:var(--muted); font-size:13px; margin-top:12px; }
 .layout { display:grid; grid-template-columns:260px minmax(0,1fr); gap:32px; max-width:1080px; margin:0 auto; padding:24px; }
 .sidebar { position:sticky; top:80px; align-self:start; max-height:calc(100vh - 104px); overflow-y:auto;
   background:var(--surface); border-radius:12px; padding:20px; }
@@ -94,6 +150,8 @@ html:not(.js) .history { display:none; }
 @media (max-width:767px) {
   .header-inner { padding:0 16px; height:52px; }
   .layout { display:block; padding:16px; }
+  #map { height:calc(100vh - 52px - 32px); }
+  .view-switch { margin-right:8px; }
   .sidebar { position:fixed; top:0; left:0; bottom:0; width:min(320px, 88vw); max-height:none; z-index:3;
     border-radius:0 12px 12px 0; padding:24px 20px; transform:translateX(-100%); transition:transform .2s; }
   .toggle:checked ~ .layout .sidebar { transform:none; }
@@ -150,13 +208,49 @@ const updateButtons = () => {
 };
 updateButtons();
 
+// 地図は差し替えのたびに作り直す。見ていた範囲は引き継ぐ
+let map;
+let lastView;
+const renderMap = () => {
+  if (map) {
+    lastView = { center: map.getCenter(), zoom: map.getZoom() };
+    map.remove();
+    map = undefined;
+  }
+  const el = document.getElementById("map");
+  if (!el || !window.L) return;
+  map = L.map(el);
+  L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png", {
+    maxZoom: 18,
+    attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>',
+  }).addTo(map);
+  const markers = [...document.querySelectorAll("template.pin")].map((t) =>
+    L.marker([Number(t.dataset.lat), Number(t.dataset.lng)]).bindPopup(t.innerHTML, { maxWidth: 280 }).addTo(map),
+  );
+  if (lastView) map.setView(lastView.center, lastView.zoom);
+  else if (markers.length > 0) map.fitBounds(L.featureGroup(markers).getBounds(), { padding: [24, 24] });
+  else map.setView([35.75, 139.5], 10);
+};
+renderMap();
+
+for (const radio of document.querySelectorAll('input[name="view"]')) {
+  radio.addEventListener("change", () => form.dispatchEvent(new Event("change")));
+}
+
 const load = async (url, { restoreForm }) => {
   const controller = new AbortController();
   pending?.abort();
   pending = controller;
   const doc = new DOMParser().parseFromString(await (await fetch(url, { signal: controller.signal })).text(), "text/html");
   document.getElementById("results").replaceWith(doc.getElementById("results"));
-  if (restoreForm) form.innerHTML = doc.querySelector("form.filter").innerHTML;
+  if (restoreForm) {
+    form.innerHTML = doc.querySelector("form.filter").innerHTML;
+    document.getElementById("view-switch").replaceWith(doc.getElementById("view-switch"));
+    for (const radio of document.querySelectorAll('input[name="view"]')) {
+      radio.addEventListener("change", () => form.dispatchEvent(new Event("change")));
+    }
+  }
+  renderMap();
 };
 
 form.addEventListener("change", async () => {
@@ -208,18 +302,24 @@ form.addEventListener("click", (e) => {
 export const createApp = (db: Db, today: () => string) => {
   const app = new Hono();
   app.get("/", (c) => {
-    const filter = parseFilter(new URL(c.req.url).searchParams, today());
+    const params = new URL(c.req.url).searchParams;
+    const filter = parseFilter(params, today());
+    const view: View = params.get("view") === "map" ? "map" : "list";
     const holidays = db.holidays();
     const list = applyFilter(db.upcoming(filter.from), filter, holidays);
     const runs = db.latestRuns();
     return c.html(html`<!doctype html>
 <html lang="ja"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>草トー一覧</title><style>${raw(STYLE)}</style>
+<title>草トー一覧</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<style>${raw(STYLE)}</style>
 </head><body>
 <input type="checkbox" id="filter-toggle" class="toggle" aria-hidden="true">
 <header class="header"><div class="header-inner">
 <h1>草トー一覧</h1>
+${viewSwitch(view)}
 <label for="filter-toggle" class="open-filter">絞り込み</label>
 </div></header>
 <div class="layout">
@@ -232,7 +332,7 @@ ${filterForm(filter)}
 <label for="filter-toggle" class="backdrop"></label>
 <main>
 <div id="results">
-<ul>${list.map((t) => row(t, holidays))}</ul>
+${view === "map" ? mapView(list, db, holidays) : html`<ul>${list.map((t) => row(t, holidays))}</ul>`}
 </div>
 <p class="runs">${runs.map(
       (r) => html`${SITE_NAMES[r.site as keyof typeof SITE_NAMES] ?? r.site}: ${r.ok ? `${r.count}件` : "取得失敗"}（${r.ranAt.slice(0, 16).replace("T", " ")}） `,

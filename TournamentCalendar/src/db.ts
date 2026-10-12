@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import type { FetchResult } from "./fetch.ts";
-import type { Status, Tournament } from "./types.ts";
+import type { SiteId, Status, Tournament } from "./types.ts";
+import type { Coords } from "./venues.ts";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tournaments (
@@ -38,6 +39,16 @@ CREATE TABLE IF NOT EXISTS crawl_runs (
 CREATE TABLE IF NOT EXISTS holidays (
   date TEXT PRIMARY KEY,
   name TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS venues (
+  site TEXT NOT NULL,
+  name TEXT NOT NULL,
+  address TEXT NOT NULL,
+  lat REAL,
+  lng REAL,
+  -- 座標を求めたときの住所。住所が変わったら求め直す
+  geocoded_address TEXT,
+  PRIMARY KEY (site, name)
 );
 CREATE TABLE IF NOT EXISTS notify_runs (
   id INTEGER PRIMARY KEY,
@@ -83,6 +94,9 @@ export const openDb = (path: string) => {
   const insertHistory = db.prepare(
     "INSERT INTO status_history (tournament_id, from_status, to_status, changed_at) VALUES (?, ?, ?, ?)",
   );
+  const upsertVenue = db.prepare(`
+    INSERT INTO venues (site, name, address) VALUES (?, ?, ?)
+    ON CONFLICT (site, name) DO UPDATE SET address = excluded.address`);
   const insertRun = db.prepare("INSERT INTO crawl_runs (site, ok, count, error, ran_at) VALUES (?, ?, ?, ?, ?)");
 
   const transaction = (fn: () => void) => {
@@ -111,9 +125,43 @@ export const openDb = (path: string) => {
             if (prev !== undefined && prev !== t.status) insertHistory.run(t.id, prev, t.status, now);
             upsert.run({ ...t, now });
           }
+          for (const v of r.venues) upsertVenue.run(r.site, v.name, v.address);
           insertRun.run(r.site, 1, r.tournaments.length, null, now);
         }
       }),
+
+    /** 住所が分かっている会場名（サイトごと）。clover の大会ページを取り直さないために使う */
+    knownVenues: (): Record<SiteId, Set<string>> => {
+      const known: Record<SiteId, Set<string>> = { clover: new Set(), leone: new Set(), inspirits: new Set() };
+      for (const r of db.prepare("SELECT site, name FROM venues").all()) known[r.site as SiteId]?.add(r.name as string);
+      return known;
+    },
+
+    venuesToGeocode: (): { site: string; name: string; address: string }[] =>
+      db
+        .prepare("SELECT site, name, address FROM venues WHERE geocoded_address IS NULL OR geocoded_address != address")
+        .all()
+        .map((r) => ({ site: r.site as string, name: r.name as string, address: r.address as string })),
+
+    /** 見つからなかった住所も geocoded_address を記録し、毎日問い合わせ直さない */
+    setCoords: (site: string, name: string, address: string, coords: Coords | null) => {
+      db.prepare("UPDATE venues SET lat = ?, lng = ?, geocoded_address = ? WHERE site = ? AND name = ?").run(
+        coords?.lat ?? null,
+        coords?.lng ?? null,
+        address,
+        site,
+        name,
+      );
+    },
+
+    /** キーは `{site}:{会場名}` */
+    venueCoords: (): Map<string, Coords> =>
+      new Map(
+        db
+          .prepare("SELECT site, name, lat, lng FROM venues WHERE lat IS NOT NULL")
+          .all()
+          .map((r) => [`${r.site}:${r.name}`, { lat: r.lat as number, lng: r.lng as number }]),
+      ),
 
     replaceHolidays: (holidays: ReadonlyArray<{ date: string; name: string }>) =>
       transaction(() => {

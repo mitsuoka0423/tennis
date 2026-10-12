@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseClover } from "../src/sites/clover.ts";
-import { parseLeone, parseLeoneVenueSurface } from "../src/sites/leone.ts";
+import { parseLeone } from "../src/sites/leone.ts";
 import { lastPage, parseInspirits, parseSurface } from "../src/sites/inspirits.ts";
 import { fixture } from "./fixture.ts";
 
@@ -104,16 +104,6 @@ describe("parseInspirits", () => {
 
   it("ページ送りから最終ページ番号を読むこと", () => {
     expect(lastPage(html)).toBe(6);
-  });
-});
-
-describe("parseLeoneVenueSurface", () => {
-  it("会場ページのサーフェース欄から面数を除いて取り出すこと", () => {
-    expect(parseLeoneVenueSurface(fixture("leone-venue.html"))).toBe("インドアオムニコート");
-  });
-
-  it("サーフェース欄が無ければ null を返すこと", () => {
-    expect(parseLeoneVenueSurface("<table><tr><td>住所</td><td>東京都</td></tr></table>")).toBeNull();
   });
 });
 

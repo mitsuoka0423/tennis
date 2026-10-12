@@ -1,6 +1,7 @@
 import type { SiteId, Tournament } from "./types.ts";
 import { CLOVER_URL, parseClover } from "./sites/clover.ts";
-import { LEONE_URL, parseLeone, parseLeoneVenueSurface } from "./sites/leone.ts";
+import { LEONE_URL, parseLeone } from "./sites/leone.ts";
+import { parseCloverAddress, parseInspiritsVenues, parseLeoneVenue, type VenueAddress } from "./venues.ts";
 import { INSPIRITS_ORIGIN, lastPage, parseInspirits } from "./sites/inspirits.ts";
 
 const USER_AGENT = "TournamentCalendar/0.1 (personal use; once a day)";
@@ -19,22 +20,44 @@ const getText = async (url: string, init?: RequestInit): Promise<Response> => {
   return res;
 };
 
-const fetchClover = async () => parseClover(await (await getText(CLOVER_URL)).text());
+type SiteData = { tournaments: Tournament[]; venues: VenueAddress[] };
 
-const fetchLeone = async (): Promise<Tournament[]> => {
-  const list = parseLeone(await (await getText(LEONE_URL)).text());
-  // 会場は数か所（2026-10-12 時点で3か所）。大会ごとではなく会場ごとに1回だけ取る
-  const surfaces = new Map<string, string | null>();
-  for (const url of new Set(list.flatMap((t) => (t.venueUrl ? [t.venueUrl] : [])))) {
-    if (surfaces.size > 0) await sleep(PAGE_INTERVAL_MS);
+/** 住所が分かっている会場は取りに行かない。clover は大会ページにしか住所が無く、大会ごとに取ると数が多いため */
+const fetchClover = async (knownVenues: ReadonlySet<string>): Promise<SiteData> => {
+  const tournaments = parseClover(await (await getText(CLOVER_URL)).text());
+  const venues: VenueAddress[] = [];
+  const firstOfVenue = new Map(tournaments.filter((t) => !knownVenues.has(t.venue)).map((t) => [t.venue, t.url]));
+  for (const [name, url] of firstOfVenue) {
+    await sleep(PAGE_INTERVAL_MS);
     try {
-      surfaces.set(url, parseLeoneVenueSurface(await (await getText(url)).text()));
+      const address = parseCloverAddress(await (await getText(url)).text());
+      if (address) venues.push({ name, address });
     } catch {
-      // サーフェスは補足情報。会場ページが取れなくても大会一覧は使える
-      surfaces.set(url, null);
+      // 住所は地図のための補足情報。取れなくても大会一覧は使える
     }
   }
-  return list.map(({ venueUrl, ...t }) => ({ ...t, surface: venueUrl ? (surfaces.get(venueUrl) ?? null) : null }));
+  return { tournaments, venues };
+};
+
+const fetchLeone = async (): Promise<SiteData> => {
+  const list = parseLeone(await (await getText(LEONE_URL)).text());
+  // 会場は数か所（2026-10-12 時点で3か所）。大会ごとではなく会場ごとに1回だけ取る
+  const info = new Map<string, ReturnType<typeof parseLeoneVenue>>();
+  for (const url of new Set(list.flatMap((t) => (t.venueUrl ? [t.venueUrl] : [])))) {
+    if (info.size > 0) await sleep(PAGE_INTERVAL_MS);
+    try {
+      info.set(url, parseLeoneVenue(await (await getText(url)).text()));
+    } catch {
+      // サーフェス・住所は補足情報。会場ページが取れなくても大会一覧は使える
+    }
+  }
+  const venues = new Map<string, VenueAddress>();
+  const tournaments = list.map(({ venueUrl, ...t }) => {
+    const v = venueUrl ? info.get(venueUrl) : undefined;
+    if (v?.address) venues.set(t.venue, { name: t.venue, address: v.address });
+    return { ...t, surface: v?.surface ?? null };
+  });
+  return { tournaments, venues: [...venues.values()] };
 };
 
 const fetchInspirits = async (today: Date) => {
@@ -63,6 +86,9 @@ const fetchInspirits = async (today: Date) => {
     return ((await res.json()) as { html: string }).html;
   };
 
+  const accessPage = await getText("https://inspirits-tennis-club.com/access");
+  const venues = parseInspiritsVenues(await accessPage.text());
+
   const first = await fetchPage(1);
   const results = parseInspirits(first);
   const last = Math.min(lastPage(first), INSPIRITS_MAX_PAGES);
@@ -70,23 +96,26 @@ const fetchInspirits = async (today: Date) => {
     await sleep(PAGE_INTERVAL_MS);
     results.push(...parseInspirits(await fetchPage(n)));
   }
-  return results;
+  return { tournaments: results, venues };
 };
 
 export type FetchResult =
-  | { site: SiteId; ok: true; tournaments: Tournament[] }
+  | { site: SiteId; ok: true; tournaments: Tournament[]; venues: VenueAddress[] }
   | { site: SiteId; ok: false; error: string };
 
-export const fetchAll = async (today = new Date()): Promise<FetchResult[]> => {
-  const jobs: Record<SiteId, () => Promise<Tournament[]>> = {
-    clover: fetchClover,
+export const fetchAll = async (
+  today = new Date(),
+  knownVenues: Record<SiteId, ReadonlySet<string>> = { clover: new Set(), leone: new Set(), inspirits: new Set() },
+): Promise<FetchResult[]> => {
+  const jobs: Record<SiteId, () => Promise<SiteData>> = {
+    clover: () => fetchClover(knownVenues.clover),
     leone: fetchLeone,
     inspirits: () => fetchInspirits(today),
   };
   return Promise.all(
     Object.entries(jobs).map(async ([site, job]): Promise<FetchResult> => {
       try {
-        return { site: site as SiteId, ok: true, tournaments: await job() };
+        return { site: site as SiteId, ok: true, ...(await job()) };
       } catch (e) {
         return { site: site as SiteId, ok: false, error: String(e) };
       }
