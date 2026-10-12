@@ -68,23 +68,26 @@ const STYLE = `
   --line:#363d45; --accent:#6cc08b; --few:#e0b062; --bad:#e08a84; }
 * { box-sizing:border-box; }
 body { margin:0; font:15px/1.7 -apple-system, "Hiragino Sans", sans-serif; color:var(--fg); background:var(--bg); }
+.header { position:sticky; top:0; z-index:1; background:var(--bg); border-bottom:1px solid var(--line); }
+.header-inner { display:flex; align-items:center; justify-content:space-between; max-width:1080px; margin:0 auto; padding:0 24px; height:56px; }
 .layout { display:grid; grid-template-columns:260px minmax(0,1fr); gap:32px; max-width:1080px; margin:0 auto; padding:24px; }
-.sidebar { position:sticky; top:24px; align-self:start; max-height:calc(100vh - 48px); overflow-y:auto;
+.sidebar { position:sticky; top:80px; align-self:start; max-height:calc(100vh - 104px); overflow-y:auto;
   background:var(--surface); border-radius:12px; padding:20px; }
 .sidebar h2 { font-size:15px; margin:0 0 8px; }
 .toggle, .open-filter, .close-filter, .backdrop { display:none; }
 /* 狭い画面では左右に並べる幅が無い。サイドバーを画面外に置き、ボタンで横から引き出す */
 @media (max-width:767px) {
+  .header-inner { padding:0 16px; height:52px; }
   .layout { display:block; padding:16px; }
-  .sidebar { position:fixed; top:0; left:0; bottom:0; width:min(320px, 88vw); max-height:none; z-index:2;
+  .sidebar { position:fixed; top:0; left:0; bottom:0; width:min(320px, 88vw); max-height:none; z-index:3;
     border-radius:0 12px 12px 0; padding:24px 20px; transform:translateX(-100%); transition:transform .2s; }
   .toggle:checked ~ .layout .sidebar { transform:none; }
-  .toggle:checked ~ .layout .backdrop { display:block; position:fixed; inset:0; z-index:1; background:rgba(0,0,0,.5); }
-  .open-filter { display:inline-block; position:sticky; top:12px; z-index:1; float:right; padding:6px 14px;
+  .toggle:checked ~ .layout .backdrop { display:block; position:fixed; inset:0; z-index:2; background:rgba(0,0,0,.5); }
+  .open-filter { display:inline-block; padding:6px 14px;
     border:1px solid var(--line); border-radius:8px; background:var(--surface); cursor:pointer; font-size:14px; }
   .close-filter { display:inline-block; float:right; cursor:pointer; color:var(--muted); padding:0 4px; }
 }
-h1 { font-size:20px; margin:4px 0 4px; }
+h1 { font-size:18px; margin:0; }
 fieldset { border:0; padding:0; margin:0 0 16px; }
 legend { font-size:12px; color:var(--muted); padding:0; margin-bottom:6px; }
 .chip { display:inline-flex; align-items:center; gap:6px; margin:0 14px 6px 0; white-space:nowrap; }
@@ -138,6 +141,10 @@ export const createApp = (db: Db, today: () => string) => {
 <title>草トー一覧</title><style>${raw(STYLE)}</style>
 </head><body>
 <input type="checkbox" id="filter-toggle" class="toggle" aria-hidden="true">
+<header class="header"><div class="header-inner">
+<h1>草トー一覧</h1>
+<label for="filter-toggle" class="open-filter">絞り込み</label>
+</div></header>
 <div class="layout">
 <aside class="sidebar">
 <label for="filter-toggle" class="close-filter" aria-label="閉じる">✕</label>
@@ -146,8 +153,6 @@ ${filterForm(filter)}
 </aside>
 <label for="filter-toggle" class="backdrop"></label>
 <main>
-<label for="filter-toggle" class="open-filter">絞り込み</label>
-<h1>草トー一覧</h1>
 <div id="results">
 <p class="count">${list.length} 件</p>
 <ul>${list.map((t) => row(t, holidays))}</ul>
