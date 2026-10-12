@@ -46,7 +46,7 @@ const filterForm = (f: Filter) => html`
     <fieldset><legend>状態</legend>
       <label class="chip"><input type="checkbox" name="hideFull" value="1" ${f.hideFull ? "checked" : ""}>満員・中止を隠す</label>
     </fieldset>
-    <div class="actions"><button type="submit">絞り込む</button> <a href="/">既定に戻す</a></div>
+    <div class="actions"><noscript><button type="submit">絞り込む</button></noscript> <a href="/">既定に戻す</a></div>
   </form>`;
 
 const row = (t: Tournament, holidays: ReadonlySet<string>) => html`
@@ -106,6 +106,25 @@ ul { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; 
 .status.open { color:var(--accent); } .status.few { color:var(--few); } .status.full, .status.cancel { color:var(--bad); }
 `;
 
+// ページ全体を送信し直すと、iPhone で引き出した絞り込みが閉じてしまう。一覧部分だけを取り直して差し替える
+const LIVE_FILTER = `
+const form = document.querySelector("form.filter");
+let pending;
+form.addEventListener("change", async () => {
+  const url = "?" + new URLSearchParams(new FormData(form));
+  const controller = new AbortController();
+  pending?.abort();
+  pending = controller;
+  try {
+    const doc = new DOMParser().parseFromString(await (await fetch(url, { signal: controller.signal })).text(), "text/html");
+    document.getElementById("results").replaceWith(doc.getElementById("results"));
+    history.replaceState(null, "", url);
+  } catch (e) {
+    if (e.name !== "AbortError") form.submit();
+  }
+});
+`;
+
 export const createApp = (db: Db, today: () => string) => {
   const app = new Hono();
   app.get("/", (c) => {
@@ -129,13 +148,16 @@ ${filterForm(filter)}
 <main>
 <label for="filter-toggle" class="open-filter">絞り込み</label>
 <h1>草トー一覧</h1>
+<div id="results">
 <p class="count">${list.length} 件</p>
 <ul>${list.map((t) => row(t, holidays))}</ul>
+</div>
 <p class="runs">${runs.map(
       (r) => html`${SITE_NAMES[r.site as keyof typeof SITE_NAMES] ?? r.site}: ${r.ok ? `${r.count}件` : "取得失敗"}（${r.ranAt.slice(0, 16).replace("T", " ")}） `,
     )}</p>
 </main>
 </div>
+<script>${raw(LIVE_FILTER)}</script>
 </body></html>`);
   });
   return app;
