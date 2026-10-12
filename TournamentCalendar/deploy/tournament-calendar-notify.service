@@ -1,0 +1,11 @@
+[Unit]
+Description=草トーの変化を Discord に通知する
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=tc
+WorkingDirectory=/opt/tennis/TournamentCalendar
+EnvironmentFile=/etc/tournament-calendar.env
+ExecStart=/usr/bin/node src/cli/notify.ts

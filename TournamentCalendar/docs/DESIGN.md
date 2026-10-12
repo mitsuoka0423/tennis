@@ -66,13 +66,20 @@ flowchart LR
 | level | レベル（正規化後、5章） |
 | level_raw | サイト上の表記 |
 | status | 受付前 / 受付中 / 空き少 / 満員 / 中止 / 不明（6章のサイト別対応） |
-| entry_opens_at | 申込開始（clover の「10/13より申込み開始」のみ取れる） |
 | url | 元ページ |
-| first_seen_at / updated_at | 初回取得・最終更新 |
+| first_seen_at / last_seen_at | 初回・最後に一覧で見かけた日時。一覧から消えた大会は last_seen_at が古いまま残る |
 
 ### status_history（状態の変化）
 
 通知の判定に使う。取得のたびに前回と比べ、変わったものだけ1行足す。
+
+### holidays（祝日）
+
+内閣府の「国民の祝日」CSV を取得のたびに入れ直す。
+
+### notify_runs（通知の実行記録）
+
+「前回通知以降の変化」の起点に使う。
 
 ### crawl_runs（取得の実行記録）
 
@@ -161,9 +168,27 @@ tennis/
     │   └── notify/
     ├── src/cli/            # 手動実行の入口（pnpm crawl）
     ├── test/fixtures/      # 各サイトの HTML の控え（2026-10-12 取得）
-    └── deploy/             # systemd unit・timer
+    └── deploy/             # systemd unit・timer、install.sh
 ```
 
-## 9. 未決事項
+## 9. 配置と運用
+
+| 項目 | 内容 |
+|---|---|
+| コード | LXC 104 の `/opt/tennis` に本リポジトリを clone。Node 24 が TypeScript をそのまま実行するため、ビルド工程は無い |
+| 設定 | `/etc/tournament-calendar.env`（600、git 管理外）。Discord の Webhook URL はここにだけ置く |
+| データ | `/var/lib/tournament-calendar/tournaments.sqlite` |
+| 時刻 | 記録・表示・「今日」の判定はすべて日本時間。LXC のタイムゾーン設定に依存しない |
+| 導入 | `TournamentCalendar/deploy/install.sh` |
+
+### 通知の初回
+
+最初の通知は送らず、起点の記録だけをする。取得済みの数百件がすべて「新着」として届くのを避けるため。
+
+### 新着から外すもの
+
+満員・中止の新着は申し込めないので知らせない。空きが出れば「空き発生」で届く。
+
+## 10. 未決事項
 
 なし（2026-10-12 時点）

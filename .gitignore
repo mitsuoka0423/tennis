@@ -12,3 +12,6 @@ DerivedData/
 
 # dspec（仕様検証ツールチェーン）
 node_modules/
+
+# TournamentCalendar
+*.sqlite

@@ -68,10 +68,23 @@ pnpm workspace を作り `TournamentCalendar` を追加。cheerio で3サイト�
 - leone の一覧には空き状況が無い。状態は常に「不明」
 - **3サイトとも一覧に申込締切が無い。**FR-3・FR-8（締切間近）の扱いを未決事項に追加
 
+### 9. 申込締切を要求から外す
+
+ユーザー判断（案A）。3サイトとも一覧に無く、募集状況とリンクで足りるため。
+
+### 10. 保存・Web ページ・通知を実装
+
+- 保存: Node 24 組み込みの `node:sqlite`。ネイティブ依存を増やさないため
+- Web: Hono。絞り込みはフォームの GET 送信。手元で 375px 幅の表示と絞り込みを確認（既定19件、平日込み・満員表示で44件）
+- 通知: Discord Webhook。2000文字で分割。dry-run で22件の新着を確認
+- 祝日: 内閣府 CSV（Shift_JIS）を取得のたびに入れ直す
+- 配置: systemd の service と timer、install.sh を `deploy/` に用意
+
+テスト51件・型チェック通過。
+
 ## ネクストアクション
 
-1. 申込締切の扱いをユーザーに確認（要求定義 11章）
-2. SQLite への保存と状態変化の記録
-3. Web ページ（一覧と絞り込み）
-4. Discord 通知
-5. LXC 104 の作成とデプロイ（systemd timer）
+1. Discord の Webhook URL を発行（ユーザー）
+2. home-server で LXC 104 を作成し、`deploy/install.sh` で導入
+3. home-server の services/ に1枚足し、README のサービス表に1行足す（同リポジトリの「サービスを足すときに触る文書」3・7）
+4. 1週間運用し、通知の量と内容を見直す

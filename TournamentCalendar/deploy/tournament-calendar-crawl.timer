@@ -1,0 +1,9 @@
+[Unit]
+Description=毎日 19:30 に取得する（20:00 の通知に間に合わせる）
+
+[Timer]
+OnCalendar=*-*-* 19:30:00 Asia/Tokyo
+Persistent=true
+
+[Install]
+WantedBy=timers.target

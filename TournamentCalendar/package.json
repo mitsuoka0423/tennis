@@ -5,6 +5,8 @@
   "description": "草トーナメントの募集情報を複数サイトから集めて一覧・通知する",
   "scripts": {
     "crawl": "node src/cli/crawl.ts",
+    "notify": "node src/cli/notify.ts",
+    "serve": "node src/cli/serve.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -12,7 +14,9 @@
     "node": ">=24"
   },
   "dependencies": {
-    "cheerio": "^1.2.0"
+    "@hono/node-server": "^2.1.4",
+    "cheerio": "^1.2.0",
+    "hono": "^4.13.13"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
