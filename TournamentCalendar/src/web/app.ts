@@ -10,6 +10,13 @@ export const SITE_NAMES = {
   inspirits: "インスピリッツ",
 } as const;
 
+// サイドバーは幅が狭く、正式名だと見出しと「これだけ」ボタンが1行に収まらないため
+const SITE_SHORT_NAMES = {
+  clover: "クローバー",
+  leone: "レオーネ",
+  inspirits: "インスピ",
+} as const;
+
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 
 const STATUS_CLASS: Record<Status, string> = {
@@ -42,7 +49,7 @@ const filterForm = (f: Filter) => html`
     <fieldset><legend>曜日</legend>${checkboxes("day", DAY_KINDS, f.days)}</fieldset>
     <fieldset><legend>種目</legend>${checkboxes("event", FILTER_EVENTS, f.events)}</fieldset>
     ${SITE_IDS.map(
-      (site) => html`<fieldset><legend>レベル（${SITE_NAMES[site]}）<button type="button" class="only" data-only="${site}" data-defaults="${DEFAULT_LEVELS[site].join(",")}">これだけ</button></legend>${checkboxes(`level.${site}`, LEVELS, f.levels[site])}</fieldset>`,
+      (site) => html`<fieldset><legend>レベル（${SITE_SHORT_NAMES[site]}）<button type="button" class="only" data-only="${site}" data-defaults="${DEFAULT_LEVELS[site].join(",")}">これだけ</button></legend>${checkboxes(`level.${site}`, LEVELS, f.levels[site])}</fieldset>`,
     )}
     <fieldset><legend>状態</legend>
       <label class="chip"><input type="checkbox" name="hideFull" value="1" ${f.hideFull ? "checked" : ""}>満員・中止を隠す</label>
@@ -97,7 +104,7 @@ html:not(.js) .history { display:none; }
 }
 h1 { font-size:18px; margin:0; }
 fieldset { border:0; padding:0; margin:0 0 16px; }
-legend { font-size:12px; color:var(--muted); padding:0; margin-bottom:6px; }
+legend { font-size:12px; color:var(--muted); padding:0; margin-bottom:6px; white-space:nowrap; }
 button.only { font-size:11px; font-weight:normal; padding:1px 8px; margin-left:8px; border-radius:999px;
   background:var(--surface-2); color:var(--muted); border:1px solid var(--line); }
 /* 「これだけ」は JS で動く。JS 無効では押しても何も起きないため、JS が動いたときだけ出す */
