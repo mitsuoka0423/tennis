@@ -66,10 +66,23 @@ const STYLE = `
 :root { color-scheme: light dark; --fg:#1d1d1f; --bg:#fff; --muted:#6e6e73; --line:#d2d2d7; --accent:#0a7d3b; }
 @media (prefers-color-scheme: dark) { :root { --fg:#f5f5f7; --bg:#111; --muted:#a1a1a6; --line:#3a3a3c; --accent:#4cd07d; } }
 body { margin:0; font:15px/1.5 -apple-system, "Hiragino Sans", sans-serif; color:var(--fg); background:var(--bg); }
-main { max-width:760px; margin:0 auto; padding:16px; }
+.layout { display:grid; grid-template-columns:240px minmax(0,1fr); gap:24px; max-width:1040px; margin:0 auto; padding:16px; }
+.sidebar { position:sticky; top:16px; align-self:start; max-height:calc(100vh - 32px); overflow-y:auto; }
+.sidebar h2 { font-size:15px; margin:0 0 4px; }
+.toggle, .open-filter, .close-filter, .backdrop { display:none; }
+/* 狭い画面では左右に並べる幅が無い。サイドバーを画面外に置き、ボタンで横から引き出す */
+@media (max-width:767px) {
+  .layout { display:block; }
+  .sidebar { position:fixed; top:0; left:0; bottom:0; width:min(300px, 85vw); max-height:none; z-index:2;
+    background:var(--bg); border-right:1px solid var(--line); padding:16px; box-sizing:border-box;
+    transform:translateX(-100%); transition:transform .2s; }
+  .toggle:checked ~ .layout .sidebar { transform:none; }
+  .toggle:checked ~ .layout .backdrop { display:block; position:fixed; inset:0; z-index:1; background:rgba(0,0,0,.4); }
+  .open-filter { display:inline-block; position:sticky; top:8px; z-index:1; float:right; padding:4px 12px;
+    border:1px solid var(--line); border-radius:8px; background:var(--bg); cursor:pointer; font-size:14px; }
+  .close-filter { display:inline-block; float:right; cursor:pointer; color:var(--muted); }
+}
 h1 { font-size:20px; margin:0 0 12px; }
-details { border:1px solid var(--line); border-radius:10px; padding:8px 12px; margin-bottom:12px; }
-summary { cursor:pointer; font-weight:600; }
 fieldset { border:0; padding:6px 0; margin:0; }
 legend { font-size:12px; color:var(--muted); padding:0; }
 .chip { display:inline-flex; align-items:center; gap:4px; margin:2px 10px 2px 0; white-space:nowrap; }
@@ -96,15 +109,26 @@ export const createApp = (db: Db, today: () => string) => {
 <html lang="ja"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>草トー一覧</title><style>${raw(STYLE)}</style>
-</head><body><main>
+</head><body>
+<input type="checkbox" id="filter-toggle" class="toggle" aria-hidden="true">
+<div class="layout">
+<aside class="sidebar">
+<label for="filter-toggle" class="close-filter" aria-label="閉じる">✕</label>
+<h2>絞り込み</h2>
+${filterForm(filter)}
+</aside>
+<label for="filter-toggle" class="backdrop"></label>
+<main>
+<label for="filter-toggle" class="open-filter">絞り込み</label>
 <h1>草トー一覧</h1>
-<details ${new URL(c.req.url).searchParams.has("q") ? "" : "open"}><summary>絞り込み</summary>${filterForm(filter)}</details>
 <p class="count">${list.length} 件</p>
 <ul>${list.map((t) => row(t, holidays))}</ul>
 <p class="runs">${runs.map(
       (r) => html`${SITE_NAMES[r.site as keyof typeof SITE_NAMES] ?? r.site}: ${r.ok ? `${r.count}件` : "取得失敗"}（${r.ranAt.slice(0, 16).replace("T", " ")}） `,
     )}</p>
-</main></body></html>`);
+</main>
+</div>
+</body></html>`);
   });
   return app;
 };

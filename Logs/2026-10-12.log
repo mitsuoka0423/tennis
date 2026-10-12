@@ -94,6 +94,12 @@ SSH 接続・名前解決・外向き HTTPS を確認。curl と Node は未導�
 `install.sh` で systemd を有効化し、手動の初回取得で 218 件。Web ページ（:8080）で既定19件を確認。
 home-server に services/tennis-calendar.md と README の行を追加。
 
+### 13. 絞り込みをサイドバーへ移動
+
+ユーザー要望: 絞り込みが上部を大きく占める。
+PC 幅は左サイドバー（240px、スクロール追従）。iPhone 幅は左から引き出すドロワー。
+1024px と 375px で配置と開閉を確認。横スクロールなし。
+
 ## ネクストアクション
 
 1. Discord の Webhook URL を `/etc/tournament-calendar.env` に書く（ユーザー）。
