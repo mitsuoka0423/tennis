@@ -1,0 +1,152 @@
+# 草トーナメント横断カレンダー 基本設計（v1.0）
+
+要求は [REQUIREMENTS.md](./REQUIREMENTS.md) を参照。
+
+## 1. 全体構成
+
+```mermaid
+flowchart LR
+  subgraph HS["自宅サーバー mitsu-server（Proxmox VE）"]
+    subgraph LXC["LXC 104: tennis-calendar"]
+      CRAWL["取得処理<br/>毎日 19:30"]
+      DB[("SQLite")]
+      WEB["Web ページ<br/>LAN 内のみ"]
+      NOTIFY["通知処理<br/>毎日 20:00"]
+    end
+  end
+  S1["クローバーカップ"] --> CRAWL
+  S2["レオーネカップ"] --> CRAWL
+  S3["インスピリッツ"] --> CRAWL
+  CRAWL --> DB
+  DB --> WEB
+  DB --> NOTIFY
+  NOTIFY --> DISCORD["Discord<br/>Webhook"]
+  PHONE["iPhone（家の Wi-Fi）"] --> WEB
+```
+
+## 2. 実行基盤
+
+自宅サーバー（home-server リポジトリ）に、専用の LXC を1台追加する。
+
+| 項目 | 値 | 根拠 |
+|---|---|---|
+| ゲスト | LXC 104 `tennis-calendar` | home-server の原則「1 サービス = 1 ゲスト」「既定は LXC」 |
+| 割り当て | 512 MB / 1 コア（cpulimit 1）/ 8 GB | 1日1回の取得と小さな Web ページのみ。原則「上限を必ず付ける」 |
+| IP | `192.168.11.104/24`（静的） | 原則「サービスのアドレスは固定する」 |
+| 公開範囲 | LAN 内のみ | home-server の方針「既定は LAN 内のみ」 |
+
+外出先からの閲覧はしない。通知に元ページへのリンクを載せるため、外では Discord から直接申し込める。
+
+作成前に home-server の `docs/guests.md`（台帳・配分）と `docs/network.md`（ポート）へ1行ずつ足す。
+
+## 3. 技術選定
+
+| 対象 | 選定 | 理由 |
+|---|---|---|
+| 言語 | TypeScript（Node.js 24） | 本リポジトリが既に pnpm / Node 24 を使っている。モノレポで揃える |
+| HTML 解析 | cheerio | clover・leone は静的 HTML。ヘッドレスブラウザは 512 MB の LXC には重い |
+| inspirits の取得 | `POST /ajax/reservations/calendar` を直接呼ぶ | 一覧はこの API から読み込まれている（2026-10-12 確認）。ページ送りあり |
+| 保存 | SQLite | 1プロセス・1ファイルで足りる。控えは vzdump に乗る |
+| Web | Hono で SSR | 絞り込みをクエリ文字列で受け、サーバー側で描画する。クライアント側のビルドが不要 |
+| 定期実行 | systemd timer | LXC 内で完結する。cron より失敗時のログが追いやすい |
+| 通知 | Discord Webhook | Bot の常駐が不要。URL 1つで送れる |
+
+## 4. データモデル
+
+### tournaments（大会）
+
+| 列 | 内容 |
+|---|---|
+| id | `{サイトID}:{サイト内の大会キー}` |
+| site | サイト ID（`clover` / `leone` / `inspirits`。要求定義7章） |
+| name | 大会名 |
+| date / start_time | 開催日・開始時刻 |
+| venue | 会場 |
+| event | 種目（正規化後: 男子シングルス 等） |
+| level | レベル（正規化後、5章） |
+| level_raw | サイト上の表記 |
+| status | 受付前 / 受付中 / 空き少 / 満員 / 中止 |
+| entry_opens_at / entry_closes_at | 申込開始・締切（取れるサイトのみ） |
+| url | 元ページ |
+| first_seen_at / updated_at | 初回取得・最終更新 |
+
+### status_history（状態の変化）
+
+通知の判定に使う。取得のたびに前回と比べ、変わったものだけ1行足す。
+
+### crawl_runs（取得の実行記録）
+
+サイトごとの成否と件数。件数0件や失敗が続いたら通知に載せる（NFR-4）。
+
+## 5. 正規化
+
+### レベル
+
+| 正規化後 | clover | leone | inspirits |
+|---|---|---|---|
+| 初級 | 初級 | （要確認） | 初級・超初級 |
+| 初中級 | 初中級・初中級以下 | （要確認） | 初中級 |
+| 中級 | 中級・中級以下 | （要確認） | 中級 |
+| 中上級 | 中級以上 | 中上級 | 中上級 |
+| オープン | オープン | オープン（グレードA〜C） | オープン |
+
+（要確認）の欄は実装時に leone の全表記を集めてから埋める。
+
+### 休日
+
+土日と、内閣府の「国民の祝日」CSV に載っている日。
+
+## 6. 通知
+
+毎日 20:00 に、既定の絞り込み（男子シングルス・休日・中級/中上級）に合う大会の、前回通知以降の変化を1通にまとめて送る。
+
+| 区分 | 判定 |
+|---|---|
+| 新着 | 前回通知以降に初めて取得した |
+| 申込開始 | 状態が「受付前」から「受付中」になった |
+| 空き発生 | 状態が「満員」から「受付中 / 空き少」になった |
+| 締切間近 | 締切が3日以内（締切が取れるサイトのみ） |
+| 取得失敗 | サイトの取得失敗、または0件 |
+
+変化が無い日は送らない。
+
+## 7. 画面
+
+一覧1画面のみ。上部に絞り込み、下に開催日順の大会一覧を置く。
+
+| 絞り込み | 形式 | 既定値 |
+|---|---|---|
+| 期間 | 開始日・終了日 | 今日〜60日後 |
+| 曜日 | 休日 / 平日（複数選択） | 休日 |
+| 種目 | 複数選択 | 男子シングルス |
+| レベル | 複数選択（5章の正規化後） | 中級・中上級 |
+| 空き | 満員・中止を隠す | 隠す |
+| サイト | 複数選択 | すべて |
+
+絞り込みはフォームの GET 送信でクエリ文字列に載せる。条件ごとに URL が決まるため、
+iPhone のホーム画面に条件付きで追加できる。JavaScript は使わない。
+
+各行に表示する項目: 開催日（曜日）・開始時刻・大会名・会場・種目・レベル（サイト上の表記も併記）・状態・申込締切・元ページへのリンク。
+
+## 8. ディレクトリ構成（モノレポ）
+
+```
+tennis/
+├── package.json            # pnpm workspace のルート
+├── pnpm-workspace.yaml     # TournamentCalendar を追加
+├── TennisAnalyser/
+└── TournamentCalendar/
+    ├── docs/
+    ├── src/
+    │   ├── sites/          # サイトごとの取得処理（clover・leone・inspirits）
+    │   ├── normalize/
+    │   ├── db/
+    │   ├── web/
+    │   └── notify/
+    ├── test/fixtures/      # 各サイトの HTML / JSON の控え
+    └── deploy/             # systemd unit・timer
+```
+
+## 9. 未決事項
+
+なし（2026-10-12 時点）
