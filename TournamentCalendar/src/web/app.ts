@@ -78,7 +78,7 @@ body { margin:0; font:15px/1.7 -apple-system, "Hiragino Sans", sans-serif; color
 .sidebar h2 { font-size:15px; margin:0; }
 .sidebar-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; }
 .history { display:flex; gap:6px; }
-.history button { font-size:12px; font-weight:normal; padding:2px 10px; border-radius:6px; background:var(--surface-2);
+.history button { font-size:16px; line-height:1; font-weight:normal; width:32px; height:28px; padding:0; border-radius:6px; background:var(--surface-2);
   color:var(--fg); border:1px solid var(--line); }
 .history button:disabled { opacity:.4; cursor:default; }
 html:not(.js) .history { display:none; }
@@ -219,7 +219,7 @@ export const createApp = (db: Db, today: () => string) => {
 <aside class="sidebar">
 <label for="filter-toggle" class="close-filter" aria-label="閉じる">✕</label>
 <div class="sidebar-head"><h2>絞り込み</h2>
-<span class="history"><button type="button" id="undo" title="元に戻す（⌘Z）">↶ 元に戻す</button><button type="button" id="redo" title="やり直す（⇧⌘Z）">やり直す ↷</button></span></div>
+<span class="history"><button type="button" id="undo" title="元に戻す（⌘Z）" aria-label="元に戻す">↶</button><button type="button" id="redo" title="やり直す（⇧⌘Z）" aria-label="やり直す">↷</button></span></div>
 ${filterForm(filter)}
 </aside>
 <label for="filter-toggle" class="backdrop"></label>
