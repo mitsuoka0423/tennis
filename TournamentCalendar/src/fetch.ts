@@ -1,6 +1,7 @@
 import type { SiteId, Tournament } from "./types.ts";
 import { CLOVER_URL, parseClover } from "./sites/clover.ts";
 import { LEONE_URL, parseLeone } from "./sites/leone.ts";
+import { sha256, WISE_PDF_SHA256, WISE_PDF_URL, WISE_VENUE_ADDRESS, wiseTournaments } from "./sites/wise.ts";
 import { parseCloverAddress, parseInspiritsVenues, parseLeoneVenue, type VenueAddress } from "./venues.ts";
 import { INSPIRITS_ORIGIN, lastPage, parseInspirits } from "./sites/inspirits.ts";
 
@@ -99,18 +100,31 @@ const fetchInspirits = async (today: Date) => {
   return { tournaments: results, venues };
 };
 
+const fetchWise = async (): Promise<SiteData> => {
+  const pdf = await (await getText(WISE_PDF_URL)).arrayBuffer();
+  // 書き写した日程が古くなったまま出し続けないよう、取得失敗として通知に載せる
+  if (sha256(pdf) !== WISE_PDF_SHA256) throw new Error("PDF が更新された。src/sites/wise.ts の日程の書き写しを見直す");
+  return { tournaments: wiseTournaments(), venues: [{ name: "東宝調布スポーツパーク", address: WISE_VENUE_ADDRESS }] };
+};
+
 export type FetchResult =
   | { site: SiteId; ok: true; tournaments: Tournament[]; venues: VenueAddress[] }
   | { site: SiteId; ok: false; error: string };
 
 export const fetchAll = async (
   today = new Date(),
-  knownVenues: Record<SiteId, ReadonlySet<string>> = { clover: new Set(), leone: new Set(), inspirits: new Set() },
+  knownVenues: Record<SiteId, ReadonlySet<string>> = {
+    clover: new Set(),
+    leone: new Set(),
+    inspirits: new Set(),
+    wise: new Set(),
+  },
 ): Promise<FetchResult[]> => {
   const jobs: Record<SiteId, () => Promise<SiteData>> = {
     clover: () => fetchClover(knownVenues.clover),
     leone: fetchLeone,
     inspirits: () => fetchInspirits(today),
+    wise: fetchWise,
   };
   return Promise.all(
     Object.entries(jobs).map(async ([site, job]): Promise<FetchResult> => {

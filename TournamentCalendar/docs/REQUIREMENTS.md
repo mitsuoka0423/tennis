@@ -77,6 +77,7 @@
 | `clover` | クローバーカップ（NPOテニスネットワーク） | https://tennis-net.jp/clover | 大会ページは許可 | 静的 HTML に大会名・開催日・会場・グレード・申込状況がある。取得容易 |
 | `leone` | レオーネカップ 男子シングルス | https://leone-tokyo2022.com/mens-singles/ | 大会ページは許可 | 静的 HTML の表に日時・大会名・レベル・会場がある。空き状況は詳細ページ側の可能性あり |
 | `inspirits` | インスピリッツ 試合一覧 | https://reserve.inspirits-tennis-club.com/reservations/calendar | robots.txt なし。ページに `noindex,nofollow` | 一覧は JavaScript で後から読み込まれ、HTML に大会情報が無い。自動取得はユーザー判断で可。一覧は `POST /ajax/reservations/calendar` から読み込まれている |
+| `wise` | ワイズコミュニティ '26 WISE サンデーナイトセッション | http://www.teamwise.jp/26sundaynight.pdf | robots.txt なし（404） | 年間日程の PDF のみ。日程表はテキストにすると日付の順序が崩れるため、書き写して持つ（2026-10-12 追加） |
 
 ## 8. スコープ外（初期）
 

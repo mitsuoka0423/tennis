@@ -1,4 +1,4 @@
-export const SITE_IDS = ["clover", "leone", "inspirits"] as const;
+export const SITE_IDS = ["clover", "leone", "inspirits", "wise"] as const;
 export type SiteId = (typeof SITE_IDS)[number];
 
 export const EVENTS = [

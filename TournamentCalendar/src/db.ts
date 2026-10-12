@@ -132,7 +132,12 @@ export const openDb = (path: string) => {
 
     /** 住所が分かっている会場名（サイトごと）。clover の大会ページを取り直さないために使う */
     knownVenues: (): Record<SiteId, Set<string>> => {
-      const known: Record<SiteId, Set<string>> = { clover: new Set(), leone: new Set(), inspirits: new Set() };
+      const known: Record<SiteId, Set<string>> = {
+        clover: new Set(),
+        leone: new Set(),
+        inspirits: new Set(),
+        wise: new Set(),
+      };
       for (const r of db.prepare("SELECT site, name FROM venues").all()) known[r.site as SiteId]?.add(r.name as string);
       return known;
     },

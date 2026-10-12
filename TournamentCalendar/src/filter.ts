@@ -19,6 +19,7 @@ export const DEFAULT_LEVELS: Record<SiteId, Level[]> = {
   clover: ["中級", "中上級"],
   leone: ["中級", "中上級"],
   inspirits: ["中級", "中上級"],
+  wise: ["中級", "中上級"],
 };
 
 /** 絞り込みに出す種目。女子の種目と団体戦は出ないので選択肢から外す（2026-10-12 ユーザー判断） */

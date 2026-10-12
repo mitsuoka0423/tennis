@@ -9,6 +9,7 @@ export const SITE_NAMES = {
   clover: "クローバーカップ",
   leone: "レオーネカップ",
   inspirits: "インスピリッツ",
+  wise: "ワイズ サンデーナイト",
 } as const;
 
 // サイドバーは幅が狭く、正式名だと見出しと「これだけ」ボタンが1行に収まらないため
@@ -16,6 +17,7 @@ const SITE_SHORT_NAMES = {
   clover: "クローバー",
   leone: "レオーネ",
   inspirits: "インスピ",
+  wise: "ワイズ",
 } as const;
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];

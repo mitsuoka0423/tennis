@@ -30,14 +30,19 @@ describe("parseFilter", () => {
       to: "2026-12-11",
       days: ["休日"],
       events: ["男子シングルス"],
-      levels: { clover: ["中級", "中上級"], leone: ["中級", "中上級"], inspirits: ["中級", "中上級"] },
+      levels: {
+        clover: ["中級", "中上級"],
+        leone: ["中級", "中上級"],
+        inspirits: ["中級", "中上級"],
+        wise: ["中級", "中上級"],
+      },
       hideFull: true,
     });
   });
 
   it("送信済みのフォームでチェックが無い項目は空として扱うこと", () => {
     const f = parseFilter(new URLSearchParams("q=1&level.leone=オープン"), TODAY);
-    expect(f.levels).toEqual({ clover: [], leone: ["オープン"], inspirits: [] });
+    expect(f.levels).toEqual({ clover: [], leone: ["オープン"], inspirits: [], wise: [] });
     expect(f.days).toEqual([]);
     expect(f.hideFull).toBe(false);
   });
@@ -71,7 +76,7 @@ describe("applyFilter", () => {
   });
 
   it("レベルをサイトごとに判定すること", () => {
-    const perSite = { ...f, levels: { clover: ["初級"], leone: ["オープン"], inspirits: [] } } as typeof f;
+    const perSite = { ...f, levels: { clover: ["初級"], leone: ["オープン"], inspirits: [], wise: [] } } as typeof f;
     const list = [
       tournament({ id: "clover-beginner", site: "clover", level: "初級" }),
       tournament({ id: "clover-open", site: "clover", level: "オープン" }),
