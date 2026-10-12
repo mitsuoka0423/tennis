@@ -88,9 +88,16 @@ SSH で Proxmox に入り `pct create`（Ubuntu 26.04、512 MB / 1 コア / cpul
 root には PVE ホストの authorized_keys を入れた。パスワード無し。
 SSH 接続・名前解決・外向き HTTPS を確認。curl と Node は未導入。home-server `e732073`。
 
+### 12. LXC 104 に導入
+
+ブランチを push し、LXC で clone。Ubuntu 26.04 の nodejs は 22 のため NodeSource から 24 を導入。
+`install.sh` で systemd を有効化し、手動の初回取得で 218 件。Web ページ（:8080）で既定19件を確認。
+home-server に services/tennis-calendar.md と README の行を追加。
+
 ## ネクストアクション
 
-1. Discord の Webhook URL を発行（ユーザー）
-2. LXC 104 に Node 24 を入れ、`deploy/install.sh` で導入
-3. home-server の services/ に1枚足し、README のサービス表に1行足す（同リポジトリの「サービスを足すときに触る文書」3・7）
-4. 1週間運用し、通知の量と内容を見直す
+1. Discord の Webhook URL を `/etc/tournament-calendar.env` に書く（ユーザー）。
+   未設定のままだと 20:00 の通知サービスは失敗で終わる
+2. 初回通知（起点の記録のみ）の翌日に、実際の通知内容を確認
+3. 1週間運用し、通知の量と内容を見直す
+4. `tournament-calendar` ブランチを main へマージ
