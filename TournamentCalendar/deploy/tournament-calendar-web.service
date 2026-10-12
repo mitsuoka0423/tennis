@@ -1,0 +1,13 @@
+[Unit]
+Description=草トー一覧の Web ページ
+After=network-online.target
+
+[Service]
+User=tc
+WorkingDirectory=/opt/tennis/TournamentCalendar
+EnvironmentFile=/etc/tournament-calendar.env
+ExecStart=/usr/bin/node src/cli/serve.ts
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

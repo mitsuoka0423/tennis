@@ -1,0 +1,103 @@
+# 2026-10-12 作業ログ
+
+## 実行計画
+
+草トーの募集情報が各サイトに分散している課題に対し、1箇所で一覧できる仕組みを作る。
+まずは要求定義のみ行う。実装・技術選定は要求が固まってから。
+
+## 作業ログ
+
+### 1. 要求定義ドラフトを作成
+
+`TournamentCalendar/docs/REQUIREMENTS.md` に v0.1 を作成。
+TennisAnalyser とは独立した製品のため、リポジトリ直下に別ディレクトリを切った
+（別リポジトリにするかは未決事項6）。
+
+### 2. 回答を反映して v0.2 に更新
+
+ユーザー回答: 対象サイト3件、本人のみ、Web ページ、男子シングルス/休日/中級・中上級/関東、
+通知は LINE か Discord、本リポジトリをモノレポ化して置く。
+
+対象サイトを予備調査した。
+- clover（クローバーカップ）・leone（レオーネカップ）: robots.txt で許可、静的 HTML から取得できる
+- inspirits（インスピリッツ）: 一覧は JS で後読み込み。`noindex,nofollow` あり。規約確認が必要
+
+絞り込みと通知は利用条件が具体的になったため Must に格上げした。
+
+### 3. 未決事項を確定し v1.0 とした
+
+- 通知: Discord、毎日20時に1回まとめて
+- inspirits: 自動取得してよい（ユーザー判断）
+- 地域の判定: 不要。収集対象サイトが関東に限られるため
+
+### 4. 基本設計ドラフト v0.1
+
+ユーザーから実行基盤として home-server を指定された。home-server の原則
+（1サービス1ゲスト・既定は LXC・上限必須・LAN 内のみ・台帳に書いてから作る）に合わせ、
+LXC 104 を新設する案で `TournamentCalendar/docs/DESIGN.md` を作成。
+
+inspirits は ブラウザで通信を確認し、`POST /ajax/reservations/calendar` から一覧を読み込むと判明。
+空き状況（在庫あり/希少/切れ）も含まれる。
+
+### 5. サイト ID を番号から名前へ
+
+S-1〜S-3 では値を見てもサイトが分からないため、`clover` / `leone` / `inspirits` に改めた。
+
+### 6. 基本設計を v1.0 で確定
+
+- 閲覧範囲は LAN 内のみで了承
+- 画面は一覧と絞り込みのみ。月カレンダー（FR-7）は不要としてスコープ外へ
+- 絞り込みの項目・既定値を DESIGN.md 7章に追加
+
+### 7. home-server の台帳に LXC 104 を登録
+
+home-server `e0d81a8`（main）。guests.md の配分表に VM 103 が無く、
+「残り」が実際より約 4 GB 多い既存のずれを見つけた。直すかはユーザー判断待ち。
+
+### 8. 取得処理を実装
+
+pnpm workspace を作り `TournamentCalendar` を追加。cheerio で3サイトを解析し、
+各サイトの HTML をフィクスチャとして保存してテスト（30件）を書いた。
+
+実サイトでの取得結果（2026-10-12）: clover 10件、leone 89件、inspirits 119件（6ページ）。
+
+実装で分かったこと:
+- inspirits の API は一覧ページの CSRF トークンと Cookie が要る
+- inspirits の名前欄には年齢制限・コート種別の注記が混ざる。レベルは種目直後の語だけ読む
+- inspirits の試合一覧には練習会・講座も混ざる。種目「その他」に分類
+- leone の一覧には空き状況が無い。状態は常に「不明」
+- **3サイトとも一覧に申込締切が無い。**FR-3・FR-8（締切間近）の扱いを未決事項に追加
+
+### 9. 申込締切を要求から外す
+
+ユーザー判断（案A）。3サイトとも一覧に無く、募集状況とリンクで足りるため。
+
+### 10. 保存・Web ページ・通知を実装
+
+- 保存: Node 24 組み込みの `node:sqlite`。ネイティブ依存を増やさないため
+- Web: Hono。絞り込みはフォームの GET 送信。手元で 375px 幅の表示と絞り込みを確認（既定19件、平日込み・満員表示で44件）
+- 通知: Discord Webhook。2000文字で分割。dry-run で22件の新着を確認
+- 祝日: 内閣府 CSV（Shift_JIS）を取得のたびに入れ直す
+- 配置: systemd の service と timer、install.sh を `deploy/` に用意
+
+テスト51件・型チェック通過。
+
+### 11. LXC 104 を作成
+
+SSH で Proxmox に入り `pct create`（Ubuntu 26.04、512 MB / 1 コア / cpulimit 1 / 8 GB、非特権、onboot、TZ Asia/Tokyo）。
+root には PVE ホストの authorized_keys を入れた。パスワード無し。
+SSH 接続・名前解決・外向き HTTPS を確認。curl と Node は未導入。home-server `e732073`。
+
+### 12. LXC 104 に導入
+
+ブランチを push し、LXC で clone。Ubuntu 26.04 の nodejs は 22 のため NodeSource から 24 を導入。
+`install.sh` で systemd を有効化し、手動の初回取得で 218 件。Web ページ（:8080）で既定19件を確認。
+home-server に services/tennis-calendar.md と README の行を追加。
+
+## ネクストアクション
+
+1. Discord の Webhook URL を `/etc/tournament-calendar.env` に書く（ユーザー）。
+   未設定のままだと 20:00 の通知サービスは失敗で終わる
+2. 初回通知（起点の記録のみ）の翌日に、実際の通知内容を確認
+3. 1週間運用し、通知の量と内容を見直す
+4. `tournament-calendar` ブランチを main へマージ
