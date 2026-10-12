@@ -82,9 +82,15 @@ pnpm workspace を作り `TournamentCalendar` を追加。cheerio で3サイト�
 
 テスト51件・型チェック通過。
 
+### 11. LXC 104 を作成
+
+SSH で Proxmox に入り `pct create`（Ubuntu 26.04、512 MB / 1 コア / cpulimit 1 / 8 GB、非特権、onboot、TZ Asia/Tokyo）。
+root には PVE ホストの authorized_keys を入れた。パスワード無し。
+SSH 接続・名前解決・外向き HTTPS を確認。curl と Node は未導入。home-server `e732073`。
+
 ## ネクストアクション
 
 1. Discord の Webhook URL を発行（ユーザー）
-2. home-server で LXC 104 を作成し、`deploy/install.sh` で導入
+2. LXC 104 に Node 24 を入れ、`deploy/install.sh` で導入
 3. home-server の services/ に1枚足し、README のサービス表に1行足す（同リポジトリの「サービスを足すときに触る文書」3・7）
 4. 1週間運用し、通知の量と内容を見直す
