@@ -9,9 +9,16 @@ export type Filter = {
   to: string;
   days: DayKind[];
   events: Event[];
-  levels: Level[];
-  sites: SiteId[];
+  /** サイトごとに選んだレベル。空のサイトは表示しない */
+  levels: Record<SiteId, Level[]>;
   hideFull: boolean;
+};
+
+// サイトごとに既定値を持つ: 同じ「中級」でもサイトによって強さが違い、出たいレベルがサイトで変わりうるため
+export const DEFAULT_LEVELS: Record<SiteId, Level[]> = {
+  clover: ["中級", "中上級"],
+  leone: ["中級", "中上級"],
+  inspirits: ["中級", "中上級"],
 };
 
 const DEFAULT_RANGE_DAYS = 60;
@@ -27,8 +34,7 @@ export const defaultFilter = (today: string): Filter => ({
   to: addDays(today, DEFAULT_RANGE_DAYS),
   days: ["休日"],
   events: ["男子シングルス"],
-  levels: ["中級", "中上級"],
-  sites: [...SITE_IDS],
+  levels: structuredClone(DEFAULT_LEVELS),
   hideFull: true,
 });
 
@@ -51,8 +57,9 @@ export const parseFilter = (params: URLSearchParams, today: string): Filter => {
     to: date("to", base.to),
     days: pick(params.getAll("day"), DAY_KINDS),
     events: pick(params.getAll("event"), EVENTS),
-    levels: pick(params.getAll("level"), LEVELS),
-    sites: pick(params.getAll("site"), SITE_IDS),
+    levels: Object.fromEntries(
+      SITE_IDS.map((site) => [site, pick(params.getAll(`level.${site}`), LEVELS)]),
+    ) as Record<SiteId, Level[]>,
     hideFull: params.get("hideFull") === "1",
   };
 };
@@ -68,8 +75,7 @@ export const applyFilter = (
       t.date <= filter.to &&
       filter.days.includes(isDayOff(t.date, holidays) ? "休日" : "平日") &&
       filter.events.includes(t.event) &&
-      filter.levels.includes(t.level) &&
-      filter.sites.includes(t.site) &&
+      filter.levels[t.site].includes(t.level) &&
       !(filter.hideFull && (t.status === "満員" || t.status === "中止")),
   );
 

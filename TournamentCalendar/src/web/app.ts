@@ -41,8 +41,9 @@ const filterForm = (f: Filter) => html`
     </fieldset>
     <fieldset><legend>曜日</legend>${checkboxes("day", DAY_KINDS, f.days)}</fieldset>
     <fieldset><legend>種目</legend>${checkboxes("event", EVENTS, f.events)}</fieldset>
-    <fieldset><legend>レベル</legend>${checkboxes("level", LEVELS, f.levels)}</fieldset>
-    <fieldset><legend>サイト</legend>${checkboxes("site", SITE_IDS, f.sites, (v) => SITE_NAMES[v as keyof typeof SITE_NAMES])}</fieldset>
+    ${SITE_IDS.map(
+      (site) => html`<fieldset><legend>レベル（${SITE_NAMES[site]}）</legend>${checkboxes(`level.${site}`, LEVELS, f.levels[site])}</fieldset>`,
+    )}
     <fieldset><legend>状態</legend>
       <label class="chip"><input type="checkbox" name="hideFull" value="1" ${f.hideFull ? "checked" : ""}>満員・中止を隠す</label>
     </fieldset>
